@@ -1,0 +1,228 @@
+import { Lead, LeadActivity } from '@/types/lead'
+import { generateId } from '@/lib/utils'
+
+const createActivity = (type: LeadActivity['type'], description: string, createdBy: string): LeadActivity => ({
+  id: generateId(),
+  type,
+  description,
+  createdAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000),
+  createdBy,
+})
+
+export const mockLeads: Lead[] = [
+  {
+    id: 'lead_1',
+    name: 'Rahul Sharma',
+    email: 'rahul.sharma@email.com',
+    phone: '+91 87654 32100',
+    courseInterested: 'Ethical Hacking',
+    source: 'ads',
+    status: 'new',
+    assignedTo: 'usr_5',
+    notes: 'Interested in advanced security courses',
+    createdAt: new Date('2024-01-15'),
+    updatedAt: new Date('2024-01-15'),
+    timeline: [
+      createActivity('created', 'Lead created from Google Ads', 'usr_1'),
+    ],
+  },
+  {
+    id: 'lead_2',
+    name: 'Priya Patel',
+    email: 'priya.patel@email.com',
+    phone: '+91 87654 32101',
+    courseInterested: 'Cyber Security Fundamentals',
+    source: 'referral',
+    status: 'contacted',
+    assignedTo: 'usr_6',
+    notes: 'Referred by existing student',
+    createdAt: new Date('2024-01-14'),
+    updatedAt: new Date('2024-01-16'),
+    timeline: [
+      createActivity('created', 'Lead created from referral', 'usr_4'),
+      createActivity('contacted', 'Initial call completed', 'usr_6'),
+    ],
+  },
+  {
+    id: 'lead_3',
+    name: 'Vikram Singh',
+    email: 'vikram.singh@email.com',
+    phone: '+91 87654 32102',
+    courseInterested: 'Penetration Testing',
+    source: 'organic',
+    status: 'converted',
+    assignedTo: 'usr_5',
+    notes: 'Corporate training requirement',
+    createdAt: new Date('2024-01-10'),
+    updatedAt: new Date('2024-01-18'),
+    timeline: [
+      createActivity('created', 'Lead created from organic search', 'usr_1'),
+      createActivity('contacted', 'Discussed course details', 'usr_5'),
+      createActivity('follow_up', 'Sent course curriculum', 'usr_5'),
+      createActivity('converted', 'Enrolled in batch starting Feb 1', 'usr_5'),
+    ],
+  },
+  {
+    id: 'lead_4',
+    name: 'Ananya Reddy',
+    email: 'ananya.reddy@email.com',
+    phone: '+91 87654 32103',
+    courseInterested: 'Cloud Security',
+    source: 'ads',
+    status: 'new',
+    assignedTo: 'usr_6',
+    notes: 'Looking for weekend batches',
+    createdAt: new Date('2024-01-17'),
+    updatedAt: new Date('2024-01-17'),
+    timeline: [
+      createActivity('created', 'Lead created from Google Ads', 'usr_1'),
+    ],
+  },
+  {
+    id: 'lead_5',
+    name: 'Karthik Nair',
+    email: 'karthik.nair@email.com',
+    phone: '+91 87654 32104',
+    courseInterested: 'CISSP Preparation',
+    source: 'referral',
+    status: 'contacted',
+    assignedTo: 'usr_10',
+    notes: 'IT professional with 5 years experience',
+    createdAt: new Date('2024-01-12'),
+    updatedAt: new Date('2024-01-15'),
+    timeline: [
+      createActivity('created', 'Lead created from referral', 'usr_3'),
+      createActivity('contacted', 'Discussed certification goals', 'usr_10'),
+    ],
+  },
+  {
+    id: 'lead_6',
+    name: 'Sneha Iyer',
+    email: 'sneha.iyer@email.com',
+    phone: '+91 87654 32105',
+    courseInterested: 'Network Security',
+    source: 'organic',
+    status: 'lost',
+    assignedTo: 'usr_5',
+    notes: 'Budget constraints',
+    createdAt: new Date('2024-01-08'),
+    updatedAt: new Date('2024-01-14'),
+    timeline: [
+      createActivity('created', 'Lead created from organic search', 'usr_1'),
+      createActivity('contacted', 'Initial discussion', 'usr_5'),
+      createActivity('lost', 'Not interested at this time - budget issues', 'usr_5'),
+    ],
+  },
+  {
+    id: 'lead_7',
+    name: 'Aditya Verma',
+    email: 'aditya.verma@email.com',
+    phone: '+91 87654 32106',
+    courseInterested: 'CompTIA Security+',
+    source: 'ads',
+    status: 'new',
+    assignedTo: 'usr_6',
+    notes: 'Entry level professional',
+    createdAt: new Date('2024-01-18'),
+    updatedAt: new Date('2024-01-18'),
+    timeline: [
+      createActivity('created', 'Lead created from Google Ads', 'usr_1'),
+    ],
+  },
+  {
+    id: 'lead_8',
+    name: 'Meera Krishnan',
+    email: 'meera.krishnan@email.com',
+    phone: '+91 87654 32107',
+    courseInterested: 'Ethical Hacking',
+    source: 'referral',
+    status: 'converted',
+    assignedTo: 'usr_10',
+    notes: 'College student, interested in internship',
+    createdAt: new Date('2024-01-05'),
+    updatedAt: new Date('2024-01-12'),
+    timeline: [
+      createActivity('created', 'Lead created from referral', 'usr_4'),
+      createActivity('contacted', 'Discussed course and internship', 'usr_10'),
+      createActivity('converted', 'Enrolled with internship opportunity', 'usr_10'),
+    ],
+  },
+  {
+    id: 'lead_9',
+    name: 'Rohan Deshmukh',
+    email: 'rohan.deshmukh@email.com',
+    phone: '+91 87654 32108',
+    courseInterested: 'Incident Response',
+    source: 'organic',
+    status: 'contacted',
+    assignedTo: 'usr_5',
+    notes: 'Working in SOC, looking for advanced skills',
+    createdAt: new Date('2024-01-16'),
+    updatedAt: new Date('2024-01-17'),
+    timeline: [
+      createActivity('created', 'Lead created from organic search', 'usr_1'),
+      createActivity('contacted', 'Discussed career goals', 'usr_5'),
+    ],
+  },
+  {
+    id: 'lead_10',
+    name: 'Pooja Malhotra',
+    email: 'pooja.malhotra@email.com',
+    phone: '+91 87654 32109',
+    courseInterested: 'CEH Certification',
+    source: 'ads',
+    status: 'new',
+    assignedTo: 'usr_6',
+    notes: 'IT Manager, company sponsored training',
+    createdAt: new Date('2024-01-19'),
+    updatedAt: new Date('2024-01-19'),
+    timeline: [
+      createActivity('created', 'Lead created from Google Ads', 'usr_1'),
+    ],
+  },
+  {
+    id: 'lead_11',
+    name: 'Arun Kumar',
+    email: 'arun.kumar@email.com',
+    phone: '+91 87654 32110',
+    courseInterested: 'Security Analytics',
+    source: 'referral',
+    status: 'contacted',
+    assignedTo: 'usr_10',
+    notes: 'Data analyst transitioning to security',
+    createdAt: new Date('2024-01-13'),
+    updatedAt: new Date('2024-01-16'),
+    timeline: [
+      createActivity('created', 'Lead created from referral', 'usr_3'),
+      createActivity('contacted', 'Discussed course requirements', 'usr_10'),
+    ],
+  },
+  {
+    id: 'lead_12',
+    name: 'Divya Rao',
+    email: 'divya.rao@email.com',
+    phone: '+91 87654 32111',
+    courseInterested: 'Penetration Testing',
+    source: 'organic',
+    status: 'new',
+    assignedTo: 'usr_5',
+    notes: 'Security enthusiast, self-taught',
+    createdAt: new Date('2024-01-20'),
+    updatedAt: new Date('2024-01-20'),
+    timeline: [
+      createActivity('created', 'Lead created from organic search', 'usr_1'),
+    ],
+  },
+]
+
+export function getLeadsByStatus(status: string): Lead[] {
+  return mockLeads.filter(lead => lead.status === status)
+}
+
+export function getLeadsByAssignee(userId: string): Lead[] {
+  return mockLeads.filter(lead => lead.assignedTo === userId)
+}
+
+export function getLeadById(id: string): Lead | undefined {
+  return mockLeads.find(lead => lead.id === id)
+}
