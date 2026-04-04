@@ -6,6 +6,9 @@ import { Lead } from '@/types/lead'
 import { Student } from '@/types/student'
 import { Batch } from '@/types/batch'
 import { Payment } from '@/types/payment'
+import { getUserPermissions } from '@/lib/db/queries/permissions'
+import { permissionCache } from './permissions-cache'
+import { logPermissionCheck } from '@/lib/db/queries/audit'
 
 type Permission = 
   | 'tasks.view_all'
@@ -50,6 +53,8 @@ type Permission =
   | 'payroll.process'
   | 'employees.view_all'
   | 'employees.manage'
+  | 'roles.manage'
+  | 'settings.manage'
 
 const rolePermissions: Record<Role, Permission[]> = {
   admin: [
@@ -87,6 +92,8 @@ const rolePermissions: Record<Role, Permission[]> = {
     'payroll.process',
     'employees.view_all',
     'employees.manage',
+    'roles.manage',
+    'settings.manage',
   ],
   hr: [
     'tasks.view_all',
@@ -157,24 +164,65 @@ const rolePermissions: Record<Role, Permission[]> = {
   ],
 }
 
-export function hasPermission(user: User, permission: Permission): boolean {
+async function getUserPermissionsFromDB(userId: string): Promise<string[]> {
+  const cached = permissionCache.get(userId)
+  if (cached) {
+    return cached
+  }
+
+  try {
+    const permissions = await getUserPermissions(userId)
+    permissionCache.set(userId, permissions)
+    return permissions
+  } catch (error) {
+    console.error('Failed to fetch permissions from DB, using fallback:', error)
+    // Fallback to static role-based permissions
+    const user = { id: userId, role: 'employee' } as User
+    return getPermissionsForRole(user.role)
+  }
+}
+
+function getPermissionsForRole(role: Role): string[] {
+  return rolePermissions[role] || []
+}
+
+export async function hasPermission(user: User, permission: Permission): Promise<boolean> {
+  try {
+    const permissions = await getUserPermissionsFromDB(user.id)
+    const granted = permissions.includes(permission)
+    
+    // Log permission check (async, non-blocking)
+    logPermissionCheck({
+      userId: user.id,
+      permission,
+      granted,
+    }).catch(console.error)
+    
+    return granted
+  } catch (error) {
+    console.error('Permission check failed:', error)
+    return false
+  }
+}
+
+export function hasPermissionStatic(user: User, permission: Permission): boolean {
   return rolePermissions[user.role]?.includes(permission) ?? false
 }
 
 export function canCreateTask(user: User): boolean {
-  return hasPermission(user, 'tasks.create')
+  return hasPermissionStatic(user, 'tasks.create')
 }
 
 export function canAssignTask(user: User): boolean {
-  return hasPermission(user, 'tasks.assign')
+  return hasPermissionStatic(user, 'tasks.assign')
 }
 
 export function canEditTask(user: User): boolean {
-  return hasPermission(user, 'tasks.edit')
+  return hasPermissionStatic(user, 'tasks.edit')
 }
 
 export function canDeleteTask(user: User): boolean {
-  return hasPermission(user, 'tasks.delete')
+  return hasPermissionStatic(user, 'tasks.delete')
 }
 
 export function canCompleteTask(user: User, task: Task): boolean {
@@ -182,7 +230,7 @@ export function canCompleteTask(user: User, task: Task): boolean {
 }
 
 export function canViewAllTasks(user: User): boolean {
-  return hasPermission(user, 'tasks.view_all')
+  return hasPermissionStatic(user, 'tasks.view_all')
 }
 
 export function getVisibleTasks(user: User, tasks: Task[]): Task[] {
@@ -193,35 +241,35 @@ export function getVisibleTasks(user: User, tasks: Task[]): Task[] {
 }
 
 export function canCreateLead(user: User): boolean {
-  return hasPermission(user, 'leads.create')
+  return hasPermissionStatic(user, 'leads.create')
 }
 
 export function canEditLead(user: User): boolean {
-  return hasPermission(user, 'leads.edit')
+  return hasPermissionStatic(user, 'leads.edit')
 }
 
 export function canDeleteLead(user: User): boolean {
-  return hasPermission(user, 'leads.delete')
+  return hasPermissionStatic(user, 'leads.delete')
 }
 
 export function canViewAllLeads(user: User): boolean {
-  return hasPermission(user, 'leads.view_all')
+  return hasPermissionStatic(user, 'leads.view_all')
 }
 
 export function canViewAssignedLeads(user: User): boolean {
-  return hasPermission(user, 'leads.view_assigned')
+  return hasPermissionStatic(user, 'leads.view_assigned')
 }
 
 export function canClaimLead(user: User): boolean {
-  return hasPermission(user, 'leads.claim')
+  return hasPermissionStatic(user, 'leads.claim')
 }
 
 export function canCallLead(user: User): boolean {
-  return hasPermission(user, 'leads.call')
+  return hasPermissionStatic(user, 'leads.call')
 }
 
 export function canConvertLead(user: User): boolean {
-  return hasPermission(user, 'leads.convert')
+  return hasPermissionStatic(user, 'leads.convert')
 }
 
 export function getVisibleLeads(user: User, leads: Lead[]): Lead[] {
@@ -236,23 +284,23 @@ export function getUnclaimedLeads(leads: Lead[]): Lead[] {
 }
 
 export function canViewAllStudents(user: User): boolean {
-  return hasPermission(user, 'students.view_all')
+  return hasPermissionStatic(user, 'students.view_all')
 }
 
 export function canViewAssignedStudents(user: User): boolean {
-  return hasPermission(user, 'students.view_assigned')
+  return hasPermissionStatic(user, 'students.view_assigned')
 }
 
 export function canCreateStudent(user: User): boolean {
-  return hasPermission(user, 'students.create')
+  return hasPermissionStatic(user, 'students.create')
 }
 
 export function canEditStudent(user: User): boolean {
-  return hasPermission(user, 'students.edit')
+  return hasPermissionStatic(user, 'students.edit')
 }
 
 export function canEnrollStudent(user: User): boolean {
-  return hasPermission(user, 'students.enroll')
+  return hasPermissionStatic(user, 'students.enroll')
 }
 
 export function getVisibleStudents(user: User, students: Student[]): Student[] {
@@ -268,43 +316,43 @@ export function getVisibleStudents(user: User, students: Student[]): Student[] {
 }
 
 export function canViewInterns(user: User): boolean {
-  return hasPermission(user, 'interns.view_all') || hasPermission(user, 'interns.view_assigned')
+  return hasPermissionStatic(user, 'interns.view_all') || hasPermissionStatic(user, 'interns.view_assigned')
 }
 
 export function canViewAllInterns(user: User): boolean {
-  return hasPermission(user, 'interns.view_all')
+  return hasPermissionStatic(user, 'interns.view_all')
 }
 
 export function canViewBatches(user: User): boolean {
-  return hasPermission(user, 'batches.view')
+  return hasPermissionStatic(user, 'batches.view')
 }
 
 export function canCreateBatch(user: User): boolean {
-  return hasPermission(user, 'batches.create')
+  return hasPermissionStatic(user, 'batches.create')
 }
 
 export function canEditBatch(user: User): boolean {
-  return hasPermission(user, 'batches.edit')
+  return hasPermissionStatic(user, 'batches.edit')
 }
 
 export function canManageBatch(user: User): boolean {
-  return hasPermission(user, 'batches.manage')
+  return hasPermissionStatic(user, 'batches.manage')
 }
 
 export function canViewAllPayments(user: User): boolean {
-  return hasPermission(user, 'payments.view_all')
+  return hasPermissionStatic(user, 'payments.view_all')
 }
 
 export function canViewAssignedPayments(user: User): boolean {
-  return hasPermission(user, 'payments.view_assigned')
+  return hasPermissionStatic(user, 'payments.view_assigned')
 }
 
 export function canCreatePayment(user: User): boolean {
-  return hasPermission(user, 'payments.create')
+  return hasPermissionStatic(user, 'payments.create')
 }
 
 export function canProcessPayment(user: User): boolean {
-  return hasPermission(user, 'payments.process')
+  return hasPermissionStatic(user, 'payments.process')
 }
 
 export function getVisiblePayments(user: User, payments: Payment[]): Payment[] {
@@ -315,23 +363,23 @@ export function getVisiblePayments(user: User, payments: Payment[]): Payment[] {
 }
 
 export function canViewAllCertificates(user: User): boolean {
-  return hasPermission(user, 'certificates.view_all')
+  return hasPermissionStatic(user, 'certificates.view_all')
 }
 
 export function canIssueCertificate(user: User): boolean {
-  return hasPermission(user, 'certificates.issue')
+  return hasPermissionStatic(user, 'certificates.issue')
 }
 
 export function canViewReports(user: User): boolean {
-  return hasPermission(user, 'reports.view')
+  return hasPermissionStatic(user, 'reports.view')
 }
 
 export function canApplyLeave(user: User): boolean {
-  return hasPermission(user, 'leaves.apply')
+  return hasPermissionStatic(user, 'leaves.apply')
 }
 
 export function canApproveLeave(user: User): boolean {
-  return hasPermission(user, 'leaves.approve')
+  return hasPermissionStatic(user, 'leaves.approve')
 }
 
 export function canManageTeamLeaves(user: User, leave: Leave, teamMemberIds: string[]): boolean {
@@ -341,11 +389,11 @@ export function canManageTeamLeaves(user: User, leave: Leave, teamMemberIds: str
 }
 
 export function canSubmitTimesheet(user: User): boolean {
-  return hasPermission(user, 'timesheets.submit')
+  return hasPermissionStatic(user, 'timesheets.submit')
 }
 
 export function canApproveTimesheet(user: User): boolean {
-  return hasPermission(user, 'timesheets.approve')
+  return hasPermissionStatic(user, 'timesheets.approve')
 }
 
 export function canManageTeamTimesheets(user: User, timesheet: Timesheet, teamMemberIds: string[]): boolean {
@@ -355,27 +403,27 @@ export function canManageTeamTimesheets(user: User, timesheet: Timesheet, teamMe
 }
 
 export function canViewTeamAttendance(user: User): boolean {
-  return hasPermission(user, 'attendance.view_team')
+  return hasPermissionStatic(user, 'attendance.view_team')
 }
 
 export function canViewAllPayroll(user: User): boolean {
-  return hasPermission(user, 'payroll.view_all')
+  return hasPermissionStatic(user, 'payroll.view_all')
 }
 
 export function canViewOwnPayroll(user: User): boolean {
-  return hasPermission(user, 'payroll.view_own')
+  return hasPermissionStatic(user, 'payroll.view_own')
 }
 
 export function canProcessPayroll(user: User): boolean {
-  return hasPermission(user, 'payroll.process')
+  return hasPermissionStatic(user, 'payroll.process')
 }
 
 export function canViewEmployees(user: User): boolean {
-  return hasPermission(user, 'employees.view_all')
+  return hasPermissionStatic(user, 'employees.view_all')
 }
 
 export function canManageEmployees(user: User): boolean {
-  return hasPermission(user, 'employees.manage')
+  return hasPermissionStatic(user, 'employees.manage')
 }
 
 export function canManageSettings(user: User): boolean {
@@ -384,6 +432,10 @@ export function canManageSettings(user: User): boolean {
 
 export function canManageLeadTypes(user: User): boolean {
   return user.role === 'admin'
+}
+
+export function canManageRoles(user: User): boolean {
+  return hasPermissionStatic(user, 'roles.manage')
 }
 
 export function getTeamMemberIds(managerId: string, users: User[]): string[] {
