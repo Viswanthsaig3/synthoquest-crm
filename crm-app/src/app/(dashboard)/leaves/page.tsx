@@ -39,11 +39,23 @@ export default function LeavesPage() {
     <div className="space-y-6">
       <Breadcrumb />
       
-      <PageHeader
-        title={pageTitle}
-        description={pageDescription}
-        action={!isAdmin ? { label: 'Apply Leave', href: '/leaves/apply' } : undefined}
-      />
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <PageHeader
+          title={pageTitle}
+          description={pageDescription}
+          action={!isAdmin ? { label: 'Apply Leave', href: '/leaves/apply' } : undefined}
+        />
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <Link href="/leaves/calendar">
+              <Button variant="outline">
+                <Calendar className="h-4 w-4 mr-2" />
+                View Calendar
+              </Button>
+            </Link>
+          </div>
+        )}
+      </div>
 
       {isAdmin && pendingLeaves.length > 0 && (
         <Card className="border-yellow-200 bg-yellow-50">

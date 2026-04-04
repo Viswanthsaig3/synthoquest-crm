@@ -6,7 +6,13 @@ import { StatsCard } from '@/components/shared/stats-card'
 import { QuickActions } from '@/components/shared/quick-actions'
 import { RecentActivity } from '@/components/shared/recent-activity'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { mockLeads, mockTasks, mockUsers } from '@/lib/mock-data'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
+import { mockLeads, mockTasks, mockUsers, mockStudents, mockPayments, mockBatches, mockCertificates, mockInterns, getInternStats } from '@/lib/mock-data'
+import { getLeadsByAssignee, getUnclaimedLeads, getLeadsUpcomingFollowUps, getRecentCalls, getLeadStatsByType, getPendingApprovals } from '@/lib/mock-data/leads'
+import { COURSE_FEES } from '@/lib/constants'
+import { formatDate, formatTime, formatCurrency } from '@/lib/utils'
 import {
   Users,
   TrendingUp,
@@ -18,6 +24,18 @@ import {
   BarChart3,
   FileText,
   Plus,
+  Phone,
+  Flame,
+  Zap,
+  PhoneOff,
+  ArrowRight,
+  GraduationCap,
+  BookOpen,
+  CreditCard,
+  Award,
+  IndianRupee,
+  Briefcase,
+  AlertCircle,
 } from 'lucide-react'
 import {
   AreaChart,
@@ -34,6 +52,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
+import Link from 'next/link'
 
 const leadConversionData = [
   { name: 'Mon', new: 5, converted: 2 },
@@ -76,6 +95,13 @@ export default function DashboardPage() {
   const activeTasks = mockTasks.filter(t => t.status !== 'done').length
   const completedTasks = mockTasks.filter(t => t.status === 'done').length
   const activeEmployees = mockUsers.filter(u => u.status === 'active').length
+  
+  const totalStudents = mockStudents.length
+  const activeStudents = mockStudents.filter(s => s.status === 'active').length
+  const totalRevenue = mockPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)
+  const totalDue = mockStudents.reduce((sum, s) => sum + s.totalDue, 0)
+  const activeBatches = mockBatches.filter(b => b.status === 'ongoing' || b.status === 'upcoming').length
+  const issuedCertificates = mockCertificates.length
 
   const renderAdminDashboard = () => (
     <div className="space-y-6">
@@ -90,25 +116,108 @@ export default function DashboardPage() {
           trend={{ value: 12, isPositive: true }}
         />
         <StatsCard
-          title="Conversion Rate"
-          value={`${Math.round((convertedLeads / totalLeads) * 100)}%`}
-          description={`${convertedLeads} leads converted`}
-          icon={TrendingUp}
-          trend={{ value: 5, isPositive: true }}
+          title="Active Students"
+          value={activeStudents}
+          description={`${totalStudents} total enrolled`}
+          icon={GraduationCap}
+          trend={{ value: 8, isPositive: true }}
         />
         <StatsCard
-          title="Active Tasks"
-          value={activeTasks}
-          description={`${completedTasks} completed`}
-          icon={CheckCircle}
-          trend={{ value: 8, isPositive: false }}
+          title="Total Revenue"
+          value={formatCurrency(totalRevenue)}
+          description={`${formatCurrency(totalDue)} pending`}
+          icon={IndianRupee}
+          trend={{ value: 18, isPositive: true }}
         />
         <StatsCard
-          title="Total Employees"
-          value={activeEmployees}
-          description="Active team members"
-          icon={Users}
+          title="Active Batches"
+          value={activeBatches}
+          description={`${mockBatches.filter(b => b.status === 'upcoming').length} upcoming`}
+          icon={BookOpen}
         />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GraduationCap className="h-5 w-5" />
+              Student Overview
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Active</span>
+                <span className="font-medium">{mockStudents.filter(s => s.status === 'active').length}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Completed</span>
+                <span className="font-medium">{mockStudents.filter(s => s.status === 'completed').length}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Dropped</span>
+                <span className="font-medium text-red-600">{mockStudents.filter(s => s.status === 'dropped').length}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">On Hold</span>
+                <span className="font-medium text-orange-600">{mockStudents.filter(s => s.status === 'on_hold').length}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Payment Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm text-muted-foreground">Collected</span>
+                  <span className="font-medium text-green-600">{formatCurrency(totalRevenue)}</span>
+                </div>
+                <Progress value={75} className="h-2" />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm text-muted-foreground">Pending</span>
+                  <span className="font-medium text-red-600">{formatCurrency(totalDue)}</span>
+                </div>
+                <Progress value={25} className="h-2 [&>div]:bg-red-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Award className="h-5 w-5" />
+              Quick Stats
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Certificates Issued</span>
+                <Badge>{issuedCertificates}</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Conversion Rate</span>
+                <Badge className="bg-green-100 text-green-800">{Math.round((convertedLeads / totalLeads) * 100)}%</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Total Employees</span>
+                <Badge variant="outline">{activeEmployees}</Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -193,9 +302,9 @@ export default function DashboardPage() {
         <QuickActions
           actions={[
             { label: 'Add Lead', href: '/leads/new', icon: Plus },
-            { label: 'Add Employee', href: '/employees/new', icon: Users },
-            { label: 'View Reports', href: '/payroll', icon: FileText },
-            { label: 'Manage Roles', href: '/settings/roles', icon: Target },
+            { label: 'Add Student', href: '/students/new', icon: GraduationCap },
+            { label: 'Create Batch', href: '/batches/new', icon: BookOpen },
+            { label: 'View Reports', href: '/reports', icon: BarChart3 },
           ]}
         />
       </div>
@@ -229,35 +338,157 @@ export default function DashboardPage() {
     </div>
   )
 
-  const renderHRDashboard = () => (
+  const renderHRDashboard = () => {
+    const internStats = getInternStats()
+    const pendingApprovals = getPendingApprovals()
+    const leadStatsByType = getLeadStatsByType()
+    
+    return (
     <div className="space-y-6">
       <Breadcrumb />
       
+      {pendingApprovals.length > 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-orange-600" />
+              <div>
+                <span className="font-medium text-orange-800">{pendingApprovals.length} Pending Approvals</span>
+                <span className="text-sm text-orange-700 ml-2">Intern applications awaiting your review</span>
+              </div>
+              <Link href="/interns" className="ml-auto">
+                <Button size="sm" variant="outline" className="border-orange-300 text-orange-700">
+                  Review Now
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
-          title="Total Employees"
-          value={activeEmployees}
-          description="Active team members"
-          icon={Users}
+          title="Total Students"
+          value={totalStudents}
+          description={`${activeStudents} active`}
+          icon={GraduationCap}
         />
         <StatsCard
-          title="Present Today"
-          value={Math.round(activeEmployees * 0.9)}
-          description="Checked in today"
-          icon={Calendar}
+          title="Active Interns"
+          value={internStats.active}
+          description={`${internStats.total} total`}
+          icon={Briefcase}
         />
         <StatsCard
-          title="Pending Leaves"
-          value={3}
-          description="Awaiting approval"
-          icon={Clock}
+          title="Total Revenue"
+          value={formatCurrency(totalRevenue)}
+          description={`₹${(totalDue/1000).toFixed(0)}K pending`}
+          icon={IndianRupee}
         />
         <StatsCard
-          title="Payroll Processed"
-          value="85%"
+          title="Certificates Issued"
+          value={issuedCertificates}
           description="This month"
-          icon={DollarSign}
+          icon={Award}
         />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Lead Types Overview
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50">
+                <div>
+                  <p className="font-medium text-sm">Student Leads</p>
+                  <p className="text-xs text-muted-foreground">Course enrollment</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-blue-600">{leadStatsByType['lt_student']?.total || 0}</p>
+                  <p className="text-xs text-green-600">{leadStatsByType['lt_student']?.converted || 0} converted</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-lg bg-green-50">
+                <div>
+                  <p className="font-medium text-sm">Intern Leads</p>
+                  <p className="text-xs text-muted-foreground">Internship applications</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold text-green-600">{leadStatsByType['lt_intern']?.total || 0}</p>
+                  <p className="text-xs text-green-600">{leadStatsByType['lt_intern']?.converted || 0} converted</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GraduationCap className="h-5 w-5" />
+              Recent Enrollments
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {mockStudents.slice(0, 4).map(student => (
+                <div key={student.id} className="flex items-center justify-between p-2 rounded-lg border">
+                  <div>
+                    <p className="font-medium text-sm">{student.name}</p>
+                    <p className="text-xs text-muted-foreground">{student.enrollments[0]?.courseName || 'No course'}</p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">{formatDate(student.convertedAt)}</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Briefcase className="h-5 w-5" />
+              Interns by Department
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {Object.entries(internStats.byDepartment).map(([dept, count]) => (
+                <div key={dept} className="flex items-center justify-between p-2 rounded-lg border">
+                  <span className="text-sm capitalize">{dept}</span>
+                  <Badge variant="outline">{count}</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Due Payments
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {mockStudents.filter(s => s.totalDue > 0).slice(0, 4).map(student => (
+                <div key={student.id} className="flex items-center justify-between p-2 rounded-lg border">
+                  <div>
+                    <p className="font-medium text-sm">{student.name}</p>
+                    <p className="text-xs text-muted-foreground">{student.enrollments[0]?.courseName}</p>
+                  </div>
+                  <span className="text-sm font-medium text-red-600">{formatCurrency(student.totalDue)}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -286,10 +517,10 @@ export default function DashboardPage() {
 
         <QuickActions
           actions={[
-            { label: 'Add Employee', href: '/employees/new', icon: Users },
-            { label: 'Approve Leaves', href: '/leaves/approvals', icon: CheckCircle },
-            { label: 'View Attendance', href: '/attendance', icon: Calendar },
-            { label: 'Process Payroll', href: '/payroll', icon: DollarSign },
+            { label: 'Add Student', href: '/students/new', icon: GraduationCap },
+            { label: 'View Interns', href: '/interns', icon: Briefcase },
+            { label: 'Record Payment', href: '/payments/new', icon: CreditCard },
+            { label: 'Issue Certificate', href: '/certificates', icon: Award },
           ]}
         />
       </div>
@@ -297,35 +528,43 @@ export default function DashboardPage() {
       <RecentActivity />
     </div>
   )
+}
 
-  const renderTeamLeadDashboard = () => (
+const renderTeamLeadDashboard = () => {
+    const teamLeads = mockLeads.filter(l => l.assignedTo === user.id || l.convertedBy === user.id)
+    const teamConvertedLeads = teamLeads.filter(l => l.status === 'converted')
+    const teamConversionRate = teamLeads.length > 0 ? Math.round((teamConvertedLeads.length / teamLeads.length) * 100) : 0
+    const teamRevenue = teamConvertedLeads.reduce((sum, l) => sum + (l.courseInterested ? (COURSE_FEES[l.courseInterested] || 0) : 0), 0)
+    const teamStudents = mockStudents.filter(s => s.convertedBy === user.id)
+
+    return (
     <div className="space-y-6">
       <Breadcrumb />
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard
-          title="Team Tasks"
-          value={mockTasks.length}
-          description={`${taskCompletionData[3].completed} completed`}
-          icon={CheckCircle}
-        />
-        <StatsCard
-          title="Assigned Leads"
-          value={totalLeads}
-          description={`${convertedLeads} converted`}
+          title="My Leads"
+          value={teamLeads.length}
+          description={`${teamConvertedLeads.length} converted`}
           icon={Users}
         />
         <StatsCard
-          title="Pending Timesheets"
-          value={2}
-          description="Awaiting approval"
-          icon={Clock}
+          title="Conversion Rate"
+          value={`${teamConversionRate}%`}
+          description={`${teamConvertedLeads.length} of ${teamLeads.length} leads`}
+          icon={TrendingUp}
         />
         <StatsCard
-          title="Team Size"
-          value={4}
-          description="Team members"
-          icon={Users}
+          title="My Students"
+          value={teamStudents.length}
+          description="Converted by me"
+          icon={GraduationCap}
+        />
+        <StatsCard
+          title="My Revenue"
+          value={formatCurrency(teamRevenue)}
+          description="From conversions"
+          icon={IndianRupee}
         />
       </div>
 
@@ -333,31 +572,38 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5" />
-              Team Task Progress
+              <Target className="h-5 w-5" />
+              My Lead Pipeline
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={taskCompletionData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="completed" fill="#10b981" name="Completed" />
-                <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 rounded-lg border">
+                <span className="text-muted-foreground">New Leads</span>
+                <span className="font-medium">{teamLeads.filter(l => l.status === 'new').length}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border">
+                <span className="text-muted-foreground">In Progress</span>
+                <span className="font-medium">{teamLeads.filter(l => ['contacted', 'follow_up', 'qualified'].includes(l.status)).length}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-green-50">
+                <span className="text-muted-foreground">Converted</span>
+                <span className="font-medium text-green-600">{teamConvertedLeads.length}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-lg border">
+                <span className="text-muted-foreground">Lost</span>
+                <span className="font-medium text-red-600">{teamLeads.filter(l => l.status === 'lost').length}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
         <QuickActions
           actions={[
-            { label: 'Create Task', href: '/tasks/new', icon: CheckCircle },
-            { label: 'Assign Lead', href: '/leads', icon: Users },
+            { label: 'View Leads', href: '/leads', icon: Users },
+            { label: 'My Students', href: '/students', icon: GraduationCap },
             { label: 'Approve Timesheets', href: '/timesheets/approvals', icon: Clock },
-            { label: 'Approve Leaves', href: '/leaves/approvals', icon: Calendar },
+            { label: 'View Reports', href: '/reports', icon: BarChart3 },
           ]}
         />
       </div>
@@ -365,6 +611,209 @@ export default function DashboardPage() {
       <RecentActivity />
     </div>
   )
+}
+
+  const renderSalesRepDashboard = () => {
+    const myLeads = getLeadsByAssignee(user.id)
+    const unclaimedLeads = getUnclaimedLeads()
+    const upcomingFollowUps = getLeadsUpcomingFollowUps(user.id)
+    const recentCalls = getRecentCalls(user.id, 5)
+    
+    const myConversions = myLeads.filter(l => l.status === 'converted').length
+    const totalCalls = myLeads.reduce((sum, l) => sum + l.totalCalls, 0)
+    const revenue = myLeads
+      .filter(l => l.status === 'converted')
+      .reduce((sum, l) => sum + (l.courseInterested ? (COURSE_FEES[l.courseInterested] || 0) : 0), 0)
+
+    const formatDuration = (seconds: number): string => {
+      const mins = Math.floor(seconds / 60)
+      const secs = seconds % 60
+      return `${mins}m ${secs}s`
+    }
+
+    const myStudents = mockStudents.filter(s => s.convertedBy === user.id)
+
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatsCard
+            title="My Leads"
+            value={myLeads.length}
+            description={`${unclaimedLeads.length} available to claim`}
+            icon={Users}
+          />
+          <StatsCard
+            title="My Students"
+            value={myStudents.length}
+            description="Converted leads"
+            icon={GraduationCap}
+          />
+          <StatsCard
+            title="Conversions"
+            value={myConversions}
+            description="This week"
+            icon={CheckCircle}
+          />
+          <StatsCard
+            title="Revenue"
+            value={`₹${(revenue / 1000).toFixed(0)}K`}
+            description="From conversions"
+            icon={DollarSign}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Flame className="h-5 w-5 text-red-500" />
+                  Available to Claim
+                </CardTitle>
+                <Link href="/leads/pool">
+                  <Button variant="ghost" size="sm">
+                    View All <ArrowRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {unclaimedLeads.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">No leads available</p>
+              ) : (
+                <div className="space-y-3">
+                  {unclaimedLeads.slice(0, 3).map((lead) => {
+                    const estValue = lead.courseInterested ? (COURSE_FEES[lead.courseInterested] || 0) : 0
+                    return (
+                      <div key={lead.id} className="flex items-center justify-between p-3 rounded-lg border">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-red-100">
+                            {lead.priority === 'hot' ? (
+                              <Flame className="h-4 w-4 text-red-500" />
+                            ) : lead.priority === 'warm' ? (
+                              <Zap className="h-4 w-4 text-orange-500" />
+                            ) : (
+                              <Phone className="h-4 w-4 text-blue-500" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium">{lead.name}</p>
+                            <p className="text-xs text-muted-foreground">{lead.courseInterested}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium text-green-600">₹{estValue.toLocaleString()}</p>
+                          <Badge variant="outline" className="capitalize text-xs">{lead.priority}</Badge>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-orange-500" />
+                  Today's Follow-ups
+                </CardTitle>
+                <Link href="/leads/mine">
+                  <Button variant="ghost" size="sm">
+                    View All <ArrowRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {upcomingFollowUps.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">No follow-ups scheduled</p>
+              ) : (
+                <div className="space-y-3">
+                  {upcomingFollowUps.slice(0, 3).map((lead) => (
+                    <div key={lead.id} className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <p className="font-medium">{lead.name}</p>
+                        <p className="text-xs text-muted-foreground">{lead.courseInterested}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <p className="text-sm text-orange-600">
+                            {lead.nextFollowUpAt && formatDate(lead.nextFollowUpAt)}
+                          </p>
+                        </div>
+                        <Link href={`/leads/${lead.id}?action=call`}>
+                          <Button size="sm">
+                            <Phone className="h-4 w-4" />
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Phone className="h-5 w-5" />
+              Recent Call Activity
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {recentCalls.length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">No recent calls</p>
+            ) : (
+              <div className="space-y-2">
+                {recentCalls.map((call) => {
+                  const lead = mockLeads.find(l => l.id === call.leadId)
+                  return (
+                    <div key={call.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-full bg-green-100">
+                          {call.outcome === 'answered' ? (
+                            <Phone className="h-4 w-4 text-green-600" />
+                          ) : (
+                            <PhoneOff className="h-4 w-4 text-gray-400" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium">{lead?.name}</p>
+                          <p className="text-xs text-muted-foreground">{call.remarks.substring(0, 50)}...</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm">{formatDate(call.createdAt)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {call.outcome === 'answered' ? formatDuration(call.duration) : call.outcome.replace('_', ' ')}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <QuickActions
+          actions={[
+            { label: 'Lead Pool', href: '/leads/pool', icon: Users },
+            { label: 'My Leads', href: '/leads/mine', icon: Target },
+            { label: 'My Students', href: '/students', icon: GraduationCap },
+            { label: 'Apply Leave', href: '/leaves/apply', icon: Calendar },
+          ]}
+        />
+      </div>
+    )
+  }
 
   const renderEmployeeDashboard = () => (
     <div className="space-y-6">
@@ -447,6 +896,8 @@ export default function DashboardPage() {
       return renderHRDashboard()
     case 'team_lead':
       return renderTeamLeadDashboard()
+    case 'sales_rep':
+      return renderSalesRepDashboard()
     case 'employee':
     default:
       return renderEmployeeDashboard()

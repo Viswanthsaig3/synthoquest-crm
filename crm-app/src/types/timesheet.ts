@@ -1,8 +1,7 @@
-export type TimesheetStatus = 'draft' | 'submitted' | 'approved' | 'rejected'
+export type TimesheetStatus = 'submitted' | 'approved' | 'rejected'
 
 export interface TimesheetEntry {
   id: string
-  date: Date
   taskId: string
   taskTitle: string
   hours: number
@@ -13,11 +12,25 @@ export interface Timesheet {
   id: string
   employeeId: string
   employeeName: string
-  weekStartDate: Date
+  date: Date
   entries: TimesheetEntry[]
   status: TimesheetStatus
   approvedBy: string | null
   approvedAt: Date | null
+  rejectionReason?: string | null
   totalHours: number
   createdAt: Date
+}
+
+export interface WeekTimesheetData {
+  weekStart: Date
+  weekEnd: Date
+  days: {
+    date: Date
+    dayName: string
+    timesheet?: Timesheet
+    hours: number
+    status: 'logged' | 'pending' | 'missing'
+  }[]
+  totalHours: number
 }

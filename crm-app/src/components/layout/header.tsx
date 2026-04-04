@@ -23,7 +23,7 @@ export function Header() {
   }
 
   return (
-    <header className="h-16 border-b bg-card px-6 flex items-center justify-between">
+    <header className="h-16 border-b bg-background/60 backdrop-blur-xl px-6 flex items-center justify-between">
       <div className="flex items-center gap-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />

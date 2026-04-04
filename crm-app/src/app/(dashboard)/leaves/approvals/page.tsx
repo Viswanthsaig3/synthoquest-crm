@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState } from '@/components/shared'
@@ -20,13 +20,25 @@ import {
 import { getPendingLeaves } from '@/lib/mock-data'
 import { mockUsers } from '@/lib/mock-data/users'
 import { formatDate, getInitials } from '@/lib/utils'
-import { FileText, CheckCircle, XCircle } from 'lucide-react'
+import { getTeamMemberIds, canManageTeamLeaves } from '@/lib/permissions'
+import { FileText, CheckCircle, XCircle, X } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 
 export default function LeaveApprovalsPage() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const pendingLeaves = getPendingLeaves()
+  const [rejectModal, setRejectModal] = useState<{ open: boolean; leaveId: string | null }>({
+    open: false,
+    leaveId: null,
+  })
+  const [rejectionReason, setRejectionReason] = useState('')
+
+  const allPendingLeaves = getPendingLeaves()
+  const teamMemberIds = user ? getTeamMemberIds(user.id, mockUsers) : []
+  
+  const pendingLeaves = allPendingLeaves.filter(leave => 
+    canManageTeamLeaves(user!, leave, teamMemberIds)
+  )
 
   if (!user) return null
 
@@ -37,12 +49,28 @@ export default function LeaveApprovalsPage() {
     })
   }
 
-  const handleReject = (id: string) => {
+  const openRejectModal = (leaveId: string) => {
+    setRejectModal({ open: true, leaveId })
+    setRejectionReason('')
+  }
+
+  const handleReject = () => {
+    if (!rejectionReason.trim()) {
+      toast({
+        title: 'Reason required',
+        description: 'Please provide a reason for rejection.',
+        variant: 'destructive',
+      })
+      return
+    }
+    
     toast({
       title: 'Leave rejected',
       description: 'The leave request has been rejected.',
       variant: 'destructive',
     })
+    setRejectModal({ open: false, leaveId: null })
+    setRejectionReason('')
   }
 
   return (
@@ -105,7 +133,7 @@ export default function LeaveApprovalsPage() {
                             <CheckCircle className="h-4 w-4 mr-1 text-green-600" />
                             Approve
                           </Button>
-                          <Button variant="outline" size="sm" onClick={() => handleReject(leave.id)}>
+                          <Button variant="outline" size="sm" onClick={() => openRejectModal(leave.id)}>
                             <XCircle className="h-4 w-4 mr-1 text-red-600" />
                             Reject
                           </Button>
@@ -119,6 +147,41 @@ export default function LeaveApprovalsPage() {
           )}
         </CardContent>
       </Card>
+
+      {rejectModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/80" onClick={() => setRejectModal({ open: false, leaveId: null })} />
+          <Card className="fixed z-50 w-full max-w-md">
+            <Card className="border-0 shadow-none">
+              <div className="flex items-center justify-between p-6 border-b">
+                <h3 className="text-lg font-semibold">Reject Leave Request</h3>
+                <Button variant="ghost" size="icon" onClick={() => setRejectModal({ open: false, leaveId: null })}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Rejection Reason *</label>
+                  <Textarea
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    placeholder="Please provide a reason for rejecting this leave request..."
+                    rows={4}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setRejectModal({ open: false, leaveId: null })}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" onClick={handleReject}>
+                    Reject Leave
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

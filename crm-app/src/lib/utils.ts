@@ -68,7 +68,15 @@ export function getPriorityColor(priority: string): string {
   const colors: Record<string, string> = {
     low: 'bg-gray-100 text-gray-800',
     medium: 'bg-yellow-100 text-yellow-800',
-    high: 'bg-red-100 text-red-800',
+    high: 'bg-red-100 text-gray-800',
   }
   return colors[priority] || 'bg-gray-100 text-gray-800'
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }

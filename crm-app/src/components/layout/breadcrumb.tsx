@@ -22,7 +22,7 @@ export function Breadcrumb() {
   
   const pathSegments = pathname.split('/').filter(Boolean)
   
-  const breadcrumbs = [
+  const breadcrumbs: { label: string; href: string; icon?: React.ElementType }[] = [
     { label: 'Home', href: '/', icon: Home },
   ]
 
@@ -45,7 +45,7 @@ export function Breadcrumb() {
               href={crumb.href}
               className="hover:text-foreground transition-colors flex items-center gap-1"
             >
-              {index === 0 && <crumb.icon className="h-4 w-4" />}
+              {index === 0 && crumb.icon && <crumb.icon className="h-4 w-4" />}
               {crumb.label}
             </Link>
           )}

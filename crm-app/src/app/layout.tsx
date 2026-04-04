@@ -1,10 +1,10 @@
 'use client'
 
-import { Inter } from 'next/font/google'
+import { Plus_Jakarta_Sans } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from '@/context/auth-context'
 
-const inter = Inter({ subsets: ['latin'] })
+const font = Plus_Jakarta_Sans({ subsets: ['latin'] })
 
 export default function RootLayout({
   children,
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={font.className}>
         <AuthProvider>
           {children}
         </AuthProvider>

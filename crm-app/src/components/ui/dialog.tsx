@@ -28,6 +28,23 @@ const Dialog: React.FC<DialogProps> = ({ open, onOpenChange, children }) => {
   )
 }
 
+const DialogContent = ({
+  className,
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={cn(
+      "relative grid w-full gap-4 p-6",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </div>
+)
+DialogContent.displayName = "DialogContent"
+
 const DialogHeader = ({
   className,
   ...props
@@ -83,4 +100,4 @@ const DialogDescription = React.forwardRef<
 ))
 DialogDescription.displayName = "DialogDescription"
 
-export { Dialog, DialogHeader, DialogFooter, DialogTitle, DialogDescription }
+export { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription }

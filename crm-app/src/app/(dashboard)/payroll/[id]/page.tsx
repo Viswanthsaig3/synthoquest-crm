@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Separator } from '@/components/ui/separator'
+
 import { getPayrollById } from '@/lib/mock-data'
 import { mockUsers } from '@/lib/mock-data/users'
 import { formatCurrency, formatDate, getInitials } from '@/lib/utils'

@@ -8,9 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
-import { mockAttendance, getAttendanceByEmployee } from '@/lib/mock-data'
-import { formatDate } from '@/lib/utils'
-import { Calendar, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { mockAttendance, getAttendanceByEmployee, getAttendanceSummary } from '@/lib/mock-data'
+import { mockUsers } from '@/lib/mock-data/users'
+import { formatDate, getInitials } from '@/lib/utils'
+import { canViewTeamAttendance, getManagedUsers } from '@/lib/permissions'
+import { Calendar, ChevronLeft, ChevronRight, Download, Users } from 'lucide-react'
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -21,10 +24,16 @@ export default function AttendanceHistoryPage() {
   const { user } = useAuth()
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth())
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear())
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('')
 
   if (!user) return null
 
-  const attendanceRecords = getAttendanceByEmployee(user.id)
+  const showTeamView = canViewTeamAttendance(user)
+  const managedUsers = getManagedUsers(user, mockUsers)
+  const viewEmployeeId = selectedEmployee || user.id
+  const viewEmployee = mockUsers.find(u => u.id === viewEmployeeId) || user
+
+  const attendanceRecords = getAttendanceByEmployee(viewEmployeeId)
 
   const getDaysInMonth = (month: number, year: number) => {
     return new Date(year, month + 1, 0).getDate()
@@ -70,9 +79,31 @@ export default function AttendanceHistoryPage() {
       
       <PageHeader
         title="Attendance History"
-        description="View your attendance records"
+        description={showTeamView ? "View attendance records for you and your team" : "View your attendance records"}
         exportData
       />
+
+      {showTeamView && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Team Members
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Select
+              value={selectedEmployee}
+              onChange={(e) => setSelectedEmployee(e.target.value)}
+            >
+              <option value="">My Attendance</option>
+              {managedUsers.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </Select>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card className="lg:col-span-3">
@@ -81,6 +112,7 @@ export default function AttendanceHistoryPage() {
               <CardTitle className="flex items-center gap-2">
                 <Calendar className="h-5 w-5" />
                 {MONTHS[currentMonth]} {currentYear}
+                {selectedEmployee && <span className="text-muted-foreground">- {viewEmployee.name}</span>}
               </CardTitle>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="icon" onClick={() => navigateMonth('prev')}>

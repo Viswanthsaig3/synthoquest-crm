@@ -52,14 +52,14 @@ const generateAttendance = (employeeId: string, employeeName: string, days: numb
 }
 
 export const mockAttendance: AttendanceRecord[] = [
-  ...generateAttendance('usr_5', 'James Wilson', 30),
-  ...generateAttendance('usr_6', 'Lisa Anderson', 30),
-  ...generateAttendance('usr_7', 'David Brown', 30),
-  ...generateAttendance('usr_8', 'Jennifer Taylor', 30),
-  ...generateAttendance('usr_9', 'Robert Martinez', 30),
-  ...generateAttendance('usr_10', 'Amanda White', 30),
-  ...generateAttendance('usr_11', 'Chris Thompson', 30),
-  ...generateAttendance('usr_12', 'Nicole Garcia', 30),
+  ...generateAttendance('usr_5', 'Rahul Kumar', 30),
+  ...generateAttendance('usr_6', 'Sneha Reddy', 30),
+  ...generateAttendance('usr_7', 'Amit Verma', 30),
+  ...generateAttendance('usr_8', 'Kavitha Nair', 30),
+  ...generateAttendance('usr_9', 'Sanjay Gupta', 30),
+  ...generateAttendance('usr_10', 'Divya Krishnan', 30),
+  ...generateAttendance('usr_11', 'Manish Joshi', 30),
+  ...generateAttendance('usr_12', 'Pooja Menon', 30),
 ]
 
 export function getAttendanceByEmployee(employeeId: string): AttendanceRecord[] {
@@ -83,4 +83,53 @@ export function getAttendanceSummary(employeeId: string): AttendanceSummary {
     halfDay: records.filter(r => r.status === 'half_day').length,
     averageHours: records.reduce((sum, r) => sum + r.hoursWorked, 0) / totalDays,
   }
+}
+
+export function getAllAttendance(): AttendanceRecord[] {
+  return [...mockAttendance].sort((a, b) => b.date.getTime() - a.date.getTime())
+}
+
+export function getTeamAttendance(employeeIds: string[]): AttendanceRecord[] {
+  return mockAttendance.filter(a => employeeIds.includes(a.employeeId))
+}
+
+export function getTodayTeamAttendance(employeeIds: string[]): AttendanceRecord[] {
+  const today = new Date().toDateString()
+  return mockAttendance.filter(a => 
+    employeeIds.includes(a.employeeId) && a.date.toDateString() === today
+  )
+}
+
+export function getTeamAttendanceSummary(employeeIds: string[]): {
+  totalEmployees: number
+  present: number
+  absent: number
+  late: number
+  halfDay: number
+  notCheckedIn: number
+} {
+  const today = new Date().toDateString()
+  const todayRecords = mockAttendance.filter(a => 
+    employeeIds.includes(a.employeeId) && a.date.toDateString() === today
+  )
+  
+  const checkedInIds = new Set(todayRecords.map(r => r.employeeId))
+  const notCheckedIn = employeeIds.filter(id => !checkedInIds.has(id)).length
+  
+  return {
+    totalEmployees: employeeIds.length,
+    present: todayRecords.filter(r => r.status === 'present').length,
+    absent: todayRecords.filter(r => r.status === 'absent').length,
+    late: todayRecords.filter(r => r.status === 'late').length,
+    halfDay: todayRecords.filter(r => r.status === 'half_day').length,
+    notCheckedIn,
+  }
+}
+
+export function getAttendanceByDateRange(employeeId: string, startDate: Date, endDate: Date): AttendanceRecord[] {
+  return mockAttendance.filter(a => {
+    if (a.employeeId !== employeeId) return false
+    const date = new Date(a.date)
+    return date >= startDate && date <= endDate
+  })
 }

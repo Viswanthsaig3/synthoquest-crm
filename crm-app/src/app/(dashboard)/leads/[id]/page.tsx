@@ -1,7 +1,8 @@
 'use client'
 
-import React from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import React, { useState, useEffect } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,7 +11,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { StatusBadge } from '@/components/shared'
 import { mockLeads, getLeadById } from '@/lib/mock-data'
 import { mockUsers } from '@/lib/mock-data/users'
-import { formatDate, getInitials, cn } from '@/lib/utils'
+import { formatDate, getInitials, cn, formatTime } from '@/lib/utils'
+import { canClaimLead, canCallLead, canConvertLead, canEditLead } from '@/lib/permissions'
+import { COURSE_FEES } from '@/lib/constants'
+import { CallModal } from '@/components/leads/call-modal'
+import { ConversionModal } from '@/components/leads/conversion-modal'
+import { CallRecord } from '@/types/lead'
+import { useToast } from '@/components/ui/toast'
 import { 
   ArrowLeft, 
   Edit, 
@@ -23,26 +30,46 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  GraduationCap
+  GraduationCap,
+  Flame,
+  Zap,
+  Snowflake,
+  Play,
+  FileText,
+  ExternalLink
 } from 'lucide-react'
 import Link from 'next/link'
 
 const activityIcons: Record<string, React.ReactNode> = {
   created: <UserPlus className="h-4 w-4 text-blue-600" />,
+  claimed: <UserPlus className="h-4 w-4 text-purple-600" />,
   contacted: <Phone className="h-4 w-4 text-yellow-600" />,
   follow_up: <Clock className="h-4 w-4 text-purple-600" />,
   converted: <CheckCircle className="h-4 w-4 text-green-600" />,
   lost: <XCircle className="h-4 w-4 text-red-600" />,
   note: <MessageSquare className="h-4 w-4 text-gray-600" />,
+  call: <Phone className="h-4 w-4 text-green-600" />,
 }
 
 export default function LeadDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const { user } = useAuth()
+  const { toast } = useToast()
   const leadId = params.id as string
-  const lead = getLeadById(leadId)
+  const [lead, setLead] = useState(getLeadById(leadId))
+  const [showCallModal, setShowCallModal] = useState(false)
+  const [showConversionModal, setShowConversionModal] = useState(false)
 
-  if (!lead) {
+  useEffect(() => {
+    const action = searchParams.get('action')
+    if (action === 'call' && lead && user && canCallLead(user) && lead.assignedTo === user.id) {
+      setShowCallModal(true)
+    }
+  }, [searchParams, lead, user])
+
+  if (!user || !lead) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
@@ -59,6 +86,53 @@ export default function LeadDetailPage() {
   }
 
   const assignedUser = mockUsers.find(u => u.id === lead.assignedTo)
+  const canEdit = canEditLead(user)
+  const canCall = canCallLead(user) && lead.assignedTo === user.id
+  const canConvert = canConvertLead(user) && lead.assignedTo === user.id && lead.status !== 'converted'
+  const canClaim = canClaimLead(user) && !lead.assignedTo
+
+  const handleClaim = () => {
+    toast({
+      title: 'Lead claimed',
+      description: 'You can now call this lead.',
+    })
+    setShowCallModal(true)
+  }
+
+  const handleCallComplete = (callRecord: Partial<CallRecord>) => {
+    toast({
+      title: 'Call logged',
+      description: `Duration: ${Math.floor(callRecord.duration! / 60)}m ${callRecord.duration! % 60}s`,
+    })
+    setShowCallModal(false)
+    router.push('/leads/mine')
+  }
+
+  const handleConversionComplete = (studentId: string) => {
+    toast({
+      title: 'Lead converted!',
+      description: `${lead?.name} has been enrolled as a student.`,
+    })
+    setShowConversionModal(false)
+    router.push(`/students/${studentId}`)
+  }
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case 'hot': return <Flame className="h-4 w-4 text-red-500" />
+      case 'warm': return <Zap className="h-4 w-4 text-orange-500" />
+      case 'cold': return <Snowflake className="h-4 w-4 text-blue-500" />
+      default: return null
+    }
+  }
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}m ${secs}s`
+  }
+
+  const estValue = lead.courseInterested ? (COURSE_FEES[lead.courseInterested] || 0) : 0
 
   return (
     <div className="space-y-6">
@@ -66,7 +140,7 @@ export default function LeadDetailPage() {
       
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/leads">
+          <Link href={user.role === 'sales_rep' ? '/leads/mine' : '/leads'}>
             <Button variant="ghost" size="icon">
               <ArrowLeft className="h-4 w-4" />
             </Button>
@@ -75,21 +149,38 @@ export default function LeadDetailPage() {
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold">{lead.name}</h1>
               <StatusBadge status={lead.status} />
+              {getPriorityIcon(lead.priority)}
             </div>
-            <p className="text-muted-foreground">{lead.courseInterested}</p>
+            <p className="text-muted-foreground">{lead.courseInterested || lead.typeName}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link href={`/leads/${lead.id}?edit=true`}>
-            <Button variant="outline">
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
+          {canClaim && (
+            <Button onClick={handleClaim}>
+              <UserPlus className="h-4 w-4 mr-2" />
+              Claim & Call
             </Button>
-          </Link>
-          <Button variant="destructive">
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
+          )}
+          {canCall && (
+            <Button onClick={() => setShowCallModal(true)}>
+              <Phone className="h-4 w-4 mr-2" />
+              Call
+            </Button>
+          )}
+          {canConvert && (
+            <Button variant="outline" onClick={() => setShowConversionModal(true)}>
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Mark Converted
+            </Button>
+          )}
+          {canEdit && (
+            <Link href={`/leads/${lead.id}?edit=true`}>
+              <Button variant="outline">
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -116,6 +207,15 @@ export default function LeadDetailPage() {
                   </div>
                 </div>
               </div>
+              {lead.alternatePhone && (
+                <div className="flex items-center gap-3">
+                  <Phone className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm text-muted-foreground">Alternate Phone</p>
+                    <p className="font-medium">{lead.alternatePhone}</p>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex items-center gap-3">
                   <GraduationCap className="h-4 w-4 text-muted-foreground" />
@@ -132,14 +232,79 @@ export default function LeadDetailPage() {
                   </div>
                 </div>
               </div>
-              <div className="pt-4 border-t">
-                <p className="text-sm text-muted-foreground mb-2">Source</p>
-                <Badge variant="outline" className="capitalize">{lead.source}</Badge>
+              <div className="pt-4 border-t grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2">Source</p>
+                  <Badge variant="outline" className="capitalize">{lead.source}</Badge>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground mb-2">Est. Value</p>
+                  <p className="font-semibold text-green-600">₹{estValue.toLocaleString()}</p>
+                </div>
               </div>
               {lead.notes && (
                 <div className="pt-4 border-t">
                   <p className="text-sm text-muted-foreground mb-2">Notes</p>
                   <p className="text-sm">{lead.notes}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Phone className="h-5 w-5" />
+                  Call History ({lead.callRecords.length})
+                </CardTitle>
+                {canCall && (
+                  <Button size="sm" onClick={() => setShowCallModal(true)}>
+                    <Phone className="h-4 w-4 mr-2" />
+                    Start Call
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {lead.callRecords.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">No calls made yet</p>
+              ) : (
+                <div className="space-y-3">
+                  {lead.callRecords.map((call) => (
+                    <div key={call.id} className="p-4 rounded-lg border">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <div className="p-2 rounded-full bg-green-100">
+                            {call.outcome === 'answered' ? (
+                              <Phone className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-gray-400" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium capitalize">{call.outcome.replace('_', ' ')}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {formatDate(call.createdAt)} • {formatDuration(call.duration)}
+                            </p>
+                          </div>
+                        </div>
+                        {call.recordingUrl && (
+                          <Button variant="outline" size="sm">
+                            <Play className="h-4 w-4 mr-1" />
+                            Play Recording
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-sm bg-muted/50 p-2 rounded">{call.remarks}</p>
+                      {call.followUpRequired && call.followUpDate && (
+                        <div className="flex items-center gap-2 mt-2 text-sm text-orange-600">
+                          <Calendar className="h-3 w-3" />
+                          Follow-up: {formatDate(call.followUpDate)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>
@@ -196,10 +361,57 @@ export default function LeadDetailPage() {
                     <p className="text-sm text-muted-foreground capitalize">
                       {assignedUser.department} - {assignedUser.role.replace('_', ' ')}
                     </p>
+                    {lead.claimedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Claimed: {formatDate(lead.claimedAt)}
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (
-                <p className="text-muted-foreground">Not assigned</p>
+                <div className="text-center py-4">
+                  <p className="text-muted-foreground mb-3">Not claimed yet</p>
+                  {canClaim && (
+                    <Button onClick={handleClaim} className="w-full">
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Claim This Lead
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Lead Stats</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Total Calls</span>
+                <span className="font-medium">{lead.totalCalls}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Last Contact</span>
+                <span className="font-medium">
+                  {lead.lastContactedAt ? formatDate(lead.lastContactedAt) : 'Never'}
+                </span>
+              </div>
+              {lead.nextFollowUpAt && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Next Follow-up</span>
+                  <span className="font-medium text-orange-600">
+                    {formatDate(lead.nextFollowUpAt)}
+                  </span>
+                </div>
+              )}
+              {lead.convertedAt && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Converted</span>
+                  <span className="font-medium text-green-600">
+                    {formatDate(lead.convertedAt)}
+                  </span>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -209,26 +421,52 @@ export default function LeadDetailPage() {
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button className="w-full justify-start" variant="outline">
-                <Phone className="h-4 w-4 mr-2" />
-                Log Call
-              </Button>
+              {canCall && (
+                <Button className="w-full justify-start" variant="outline" onClick={() => setShowCallModal(true)}>
+                  <Phone className="h-4 w-4 mr-2" />
+                  Log Call
+                </Button>
+              )}
               <Button className="w-full justify-start" variant="outline">
                 <MessageSquare className="h-4 w-4 mr-2" />
                 Add Note
               </Button>
               <Button className="w-full justify-start" variant="outline">
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Mark as Converted
+                <Mail className="h-4 w-4 mr-2" />
+                Send Email
               </Button>
-              <Button className="w-full justify-start" variant="outline" disabled={lead.status === 'converted'}>
-                <GraduationCap className="h-4 w-4 mr-2" />
-                Convert to Student
-              </Button>
+              {lead.status === 'converted' && (
+                <Link href={`/students?search=${encodeURIComponent(lead.name)}`}>
+                  <Button className="w-full justify-start" variant="outline">
+                    <GraduationCap className="h-4 w-4 mr-2" />
+                    View as Student
+                  </Button>
+                </Link>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
+
+      {showCallModal && user && (
+        <CallModal
+          lead={lead}
+          callerId={user.id}
+          callerName={user.name}
+          onClose={() => setShowCallModal(false)}
+          onComplete={handleCallComplete}
+        />
+      )}
+
+      {showConversionModal && user && (
+        <ConversionModal
+          lead={lead}
+          converterId={user.id}
+          converterName={user.name}
+          onClose={() => setShowConversionModal(false)}
+          onComplete={handleConversionComplete}
+        />
+      )}
     </div>
   )
 }

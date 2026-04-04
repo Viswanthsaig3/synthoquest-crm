@@ -15,7 +15,8 @@ import { mockTasks, getTasksByStatus } from '@/lib/mock-data'
 import { mockUsers } from '@/lib/mock-data/users'
 import { TASK_PRIORITIES, TASK_STATUSES } from '@/lib/constants'
 import { formatDate, getInitials, cn } from '@/lib/utils'
-import { ClipboardList, Plus, Download, Eye, Edit, LayoutGrid, List, Calendar } from 'lucide-react'
+import { canCreateTask, canViewAllTasks, getVisibleTasks } from '@/lib/permissions'
+import { ClipboardList, Plus, Download, Eye, Edit, LayoutGrid, List, Calendar, CheckCircle, Paperclip } from 'lucide-react'
 import Link from 'next/link'
 
 export default function TasksPage() {
@@ -26,23 +27,30 @@ export default function TasksPage() {
   const [view, setView] = useState<'kanban' | 'list'>('kanban')
   const [loading, setLoading] = useState(false)
 
-  const filteredTasks = useMemo(() => {
-    return mockTasks.filter(task => {
+  const visibleTasks = useMemo(() => {
+    const tasks = getVisibleTasks(user!, mockTasks)
+    return tasks.filter(task => {
       const matchesSearch = task.title.toLowerCase().includes(search.toLowerCase()) ||
         task.description.toLowerCase().includes(search.toLowerCase())
       const matchesStatus = !statusFilter || task.status === statusFilter
       const matchesPriority = !priorityFilter || task.priority === priorityFilter
       return matchesSearch && matchesStatus && matchesPriority
     })
-  }, [search, statusFilter, priorityFilter])
+  }, [search, statusFilter, priorityFilter, user])
 
-  const todoTasks = filteredTasks.filter(t => t.status === 'todo')
-  const inProgressTasks = filteredTasks.filter(t => t.status === 'in_progress')
-  const doneTasks = filteredTasks.filter(t => t.status === 'done')
+  const todoTasks = visibleTasks.filter(t => t.status === 'todo')
+  const inProgressTasks = visibleTasks.filter(t => t.status === 'in_progress')
+  const doneTasks = visibleTasks.filter(t => t.status === 'done')
 
   const getAssignedUser = (userId: string) => mockUsers.find(u => u.id === userId)
 
   if (!user) return null
+
+  const showCreateButton = canCreateTask(user)
+  const pageTitle = canViewAllTasks(user) ? 'Tasks' : 'My Tasks'
+  const pageDescription = canViewAllTasks(user) 
+    ? `${visibleTasks.length} tasks found`
+    : `${visibleTasks.length} tasks assigned to you`
 
   const TaskCard = ({ task }: { task: typeof mockTasks[0] }) => {
     const assignedUser = getAssignedUser(task.assignedTo)
@@ -53,6 +61,21 @@ export default function TasksPage() {
           <PriorityBadge priority={task.priority} />
         </div>
         <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{task.description}</p>
+        
+        {task.attachments.length > 0 && (
+          <div className="flex items-center gap-1 mb-3 text-xs text-muted-foreground">
+            <Paperclip className="h-3 w-3" />
+            <span>{task.attachments.length} file{task.attachments.length > 1 ? 's' : ''}</span>
+          </div>
+        )}
+        
+        {task.completion && (
+          <div className="flex items-center gap-1 mb-3 text-xs text-green-600">
+            <CheckCircle className="h-3 w-3" />
+            <span>Completed with remarks</span>
+          </div>
+        )}
+        
         <div className="flex items-center justify-between">
           {assignedUser && (
             <div className="flex items-center gap-2">
@@ -85,9 +108,9 @@ export default function TasksPage() {
       <Breadcrumb />
       
       <PageHeader
-        title="Tasks"
-        description={`${filteredTasks.length} tasks found`}
-        action={{ label: 'Create Task', href: '/tasks/new' }}
+        title={pageTitle}
+        description={pageDescription}
+        action={showCreateButton ? { label: 'Create Task', href: '/tasks/new' } : undefined}
         search={{ placeholder: 'Search tasks...', value: search, onChange: setSearch }}
         filters={[
           { options: TASK_STATUSES, value: statusFilter, onChange: setStatusFilter, placeholder: 'All Status' },
@@ -125,7 +148,11 @@ export default function TasksPage() {
               </h3>
             </div>
             <div className="space-y-3">
-              {todoTasks.map(task => <TaskCard key={task.id} task={task} />)}
+              {todoTasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No tasks</p>
+              ) : (
+                todoTasks.map(task => <TaskCard key={task.id} task={task} />)
+              )}
             </div>
           </div>
 
@@ -138,7 +165,11 @@ export default function TasksPage() {
               </h3>
             </div>
             <div className="space-y-3">
-              {inProgressTasks.map(task => <TaskCard key={task.id} task={task} />)}
+              {inProgressTasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No tasks</p>
+              ) : (
+                inProgressTasks.map(task => <TaskCard key={task.id} task={task} />)
+              )}
             </div>
           </div>
 
@@ -151,7 +182,11 @@ export default function TasksPage() {
               </h3>
             </div>
             <div className="space-y-3">
-              {doneTasks.map(task => <TaskCard key={task.id} task={task} />)}
+              {doneTasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No tasks</p>
+              ) : (
+                doneTasks.map(task => <TaskCard key={task.id} task={task} />)
+              )}
             </div>
           </div>
         </div>
@@ -160,15 +195,15 @@ export default function TasksPage() {
           <CardContent className="p-0">
             {loading ? (
               <TableSkeleton rows={10} />
-            ) : filteredTasks.length === 0 ? (
+            ) : visibleTasks.length === 0 ? (
               <EmptyState
                 icon={ClipboardList}
                 title="No tasks found"
-                description="Create your first task to get started."
+                description={canViewAllTasks(user) ? "Create your first task to get started." : "No tasks have been assigned to you yet."}
               />
             ) : (
               <div className="divide-y">
-                {filteredTasks.map(task => {
+                {visibleTasks.map(task => {
                   const assignedUser = getAssignedUser(task.assignedTo)
                   return (
                     <div key={task.id} className="p-4 flex items-center justify-between hover:bg-muted/50">
@@ -177,10 +212,22 @@ export default function TasksPage() {
                         <div>
                           <p className="font-medium">{task.title}</p>
                           <p className="text-sm text-muted-foreground">{task.description}</p>
+                          {task.completion && (
+                            <p className="text-xs text-green-600 mt-1">
+                              <CheckCircle className="h-3 w-3 inline mr-1" />
+                              Completed: {task.completion.remarks.substring(0, 50)}...
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
                         <PriorityBadge priority={task.priority} />
+                        {task.attachments.length > 0 && (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Paperclip className="h-3 w-3" />
+                            {task.attachments.length}
+                          </div>
+                        )}
                         {assignedUser && (
                           <div className="flex items-center gap-2">
                             <Avatar className="h-6 w-6">

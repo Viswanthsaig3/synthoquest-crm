@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { ROLES } from '@/lib/constants'
 import { Shield, Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
@@ -15,7 +14,6 @@ export default function LoginPage() {
   const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState('admin')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -24,12 +22,12 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
 
-    const success = await login(email, password, role as any)
+    const success = await login(email, password)
     
     if (success) {
       router.push('/')
     } else {
-      setError('Login failed. Please try again.')
+      setError('Login failed. Please check your credentials.')
     }
     
     setLoading(false)
@@ -77,22 +75,6 @@ export default function LoginPage() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="role">Role (Demo)</Label>
-                <select
-                  id="role"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  {ROLES.map((r) => (
-                    <option key={r.value} value={r.value}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {error && (
                 <div className="text-sm text-destructive">{error}</div>
               )}
@@ -111,21 +93,12 @@ export default function LoginPage() {
 
             <div className="mt-6 pt-6 border-t">
               <p className="text-sm text-muted-foreground text-center mb-3">
-                Demo credentials (any email/password works)
+                Use your registered email and password
               </p>
-              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                <div className="p-2 bg-muted rounded">
-                  <strong>Admin:</strong> Full access
-                </div>
-                <div className="p-2 bg-muted rounded">
-                  <strong>HR:</strong> Employee & HR modules
-                </div>
-                <div className="p-2 bg-muted rounded">
-                  <strong>Team Lead:</strong> Team management
-                </div>
-                <div className="p-2 bg-muted rounded">
-                  <strong>Employee:</strong> Personal access
-                </div>
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>Default admin account:</p>
+                <p className="font-mono">Email: admin@synthoquest.com</p>
+                <p className="font-mono">Password: Admin@123</p>
               </div>
             </div>
           </CardContent>

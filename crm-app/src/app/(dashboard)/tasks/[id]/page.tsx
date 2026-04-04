@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -10,11 +11,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
-import { StatusBadge, PriorityBadge } from '@/components/shared'
+import { StatusBadge, PriorityBadge, FileUpload } from '@/components/shared'
 import { mockTasks, getTaskById } from '@/lib/mock-data'
 import { mockUsers } from '@/lib/mock-data/users'
 import { TASK_STATUSES } from '@/lib/constants'
-import { formatDate, getInitials } from '@/lib/utils'
+import { formatDate, getInitials, formatFileSize } from '@/lib/utils'
+import { canCompleteTask, canEditTask, canDeleteTask, canAssignTask } from '@/lib/permissions'
+import { useToast } from '@/components/ui/toast'
 import { 
   ArrowLeft, 
   Edit, 
@@ -23,18 +26,27 @@ import {
   User,
   MessageSquare,
   Clock,
-  Send
+  Send,
+  CheckCircle,
+  Paperclip,
+  Download,
+  X
 } from 'lucide-react'
 import Link from 'next/link'
 
 export default function TaskDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const { user } = useAuth()
+  const { toast } = useToast()
   const taskId = params.id as string
   const task = getTaskById(taskId)
   const [newComment, setNewComment] = useState('')
+  const [showCompleteModal, setShowCompleteModal] = useState(false)
+  const [completionRemarks, setCompletionRemarks] = useState('')
+  const [completionFiles, setCompletionFiles] = useState<File[]>([])
 
-  if (!task) {
+  if (!user || !task) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
@@ -53,11 +65,40 @@ export default function TaskDetailPage() {
   const assignedUser = mockUsers.find(u => u.id === task.assignedTo)
   const createdBy = mockUsers.find(u => u.id === task.createdBy)
 
+  const canComplete = canCompleteTask(user, task)
+  const canEdit = canEditTask(user)
+  const canDelete = canDeleteTask(user)
+
   const handleAddComment = () => {
     if (newComment.trim()) {
+      toast({
+        title: 'Comment added',
+        description: 'Your comment has been added to the task.',
+      })
       setNewComment('')
     }
   }
+
+  const handleCompleteTask = () => {
+    if (!completionRemarks.trim()) {
+      toast({
+        title: 'Remarks required',
+        description: 'Please provide completion remarks.',
+        variant: 'destructive',
+      })
+      return
+    }
+    
+    toast({
+      title: 'Task completed',
+      description: 'The task has been marked as completed.',
+    })
+    setShowCompleteModal(false)
+    setCompletionRemarks('')
+    setCompletionFiles([])
+  }
+
+  const getUserById = (id: string) => mockUsers.find(u => u.id === id)
 
   return (
     <div className="space-y-6">
@@ -85,18 +126,56 @@ export default function TaskDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link href={`/tasks/${task.id}?edit=true`}>
-            <Button variant="outline">
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
+          {canComplete && task.status !== 'done' && (
+            <Button onClick={() => setShowCompleteModal(true)}>
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Mark Complete
             </Button>
-          </Link>
-          <Button variant="destructive">
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
+          )}
+          {canEdit && (
+            <Link href={`/tasks/${task.id}?edit=true`}>
+              <Button variant="outline">
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            </Link>
+          )}
+          {canDelete && (
+            <Button variant="destructive">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete
+            </Button>
+          )}
         </div>
       </div>
+
+      {task.completion && (
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+              <div>
+                <p className="font-medium text-green-800">Task Completed</p>
+                <p className="text-sm text-green-700 mt-1">{task.completion.remarks}</p>
+                <p className="text-xs text-green-600 mt-2">
+                  Completed on {formatDate(task.completion.completedAt)} by {getUserById(task.completion.completedBy)?.name}
+                </p>
+                {task.completion.attachments.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {task.completion.attachments.map(att => (
+                      <div key={att.id} className="flex items-center gap-2 px-3 py-1 bg-white rounded border text-sm">
+                        <Paperclip className="h-3 w-3" />
+                        <span>{att.fileName}</span>
+                        <span className="text-muted-foreground">({formatFileSize(att.fileSize)})</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -108,6 +187,40 @@ export default function TaskDetailPage() {
               <p className="text-muted-foreground">{task.description || 'No description provided'}</p>
             </CardContent>
           </Card>
+
+          {task.attachments.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Paperclip className="h-5 w-5" />
+                  Attachments ({task.attachments.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {task.attachments.map(attachment => {
+                    const uploader = getUserById(attachment.uploadedBy)
+                    return (
+                      <div key={attachment.id} className="flex items-center justify-between p-3 rounded-lg bg-muted">
+                        <div className="flex items-center gap-3">
+                          <Paperclip className="h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <p className="text-sm font-medium">{attachment.fileName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatFileSize(attachment.fileSize)} • Uploaded by {uploader?.name} on {formatDate(attachment.uploadedAt)}
+                            </p>
+                          </div>
+                        </div>
+                        <Button variant="ghost" size="sm">
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
@@ -162,11 +275,9 @@ export default function TaskDetailPage() {
             <CardContent className="space-y-4">
               <div>
                 <Label className="text-sm text-muted-foreground">Status</Label>
-                <Select className="mt-1">
-                  {TASK_STATUSES.map(s => (
-                    <option key={s.value} value={s.value} selected={task.status === s.value}>{s.label}</option>
-                  ))}
-                </Select>
+                <div className="mt-1">
+                  <StatusBadge status={task.status} />
+                </div>
               </div>
 
               <div>
@@ -231,6 +342,51 @@ export default function TaskDetailPage() {
           </Card>
         </div>
       </div>
+
+      {showCompleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/80" onClick={() => setShowCompleteModal(false)} />
+          <Card className="fixed z-50 w-full max-w-lg">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Complete Task</CardTitle>
+                <Button variant="ghost" size="icon" onClick={() => setShowCompleteModal(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Completion Remarks *</Label>
+                <Textarea
+                  value={completionRemarks}
+                  onChange={(e) => setCompletionRemarks(e.target.value)}
+                  placeholder="Describe what was accomplished..."
+                  rows={4}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Attachments (Optional)</Label>
+                <FileUpload
+                  onFilesChange={setCompletionFiles}
+                  maxFiles={5}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button variant="outline" onClick={() => setShowCompleteModal(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleCompleteTask}>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Mark as Complete
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }
