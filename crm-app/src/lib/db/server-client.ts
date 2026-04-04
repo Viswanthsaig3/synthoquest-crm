@@ -1,12 +1,12 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createServerClient, createBrowserClient } from '@supabase/ssr'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 export async function createClient() {
-  const cookieStore = await cookies()
+  const { cookies: nextCookies } = await import('next/headers')
+  const cookieStore = await nextCookies()
   
   return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -27,7 +27,8 @@ export async function createClient() {
 }
 
 export async function createAdminClient() {
-  const cookieStore = await cookies()
+  const { cookies: nextCookies } = await import('next/headers')
+  const cookieStore = await nextCookies()
   
   return createServerClient(supabaseUrl, supabaseServiceKey, {
     cookies: {
@@ -45,4 +46,8 @@ export async function createAdminClient() {
       },
     },
   })
+}
+
+export function createBrowserClientInstance() {
+  return createBrowserClient(supabaseUrl, supabaseAnonKey)
 }

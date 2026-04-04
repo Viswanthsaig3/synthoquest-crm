@@ -265,7 +265,7 @@ export default function LeadsPage() {
                           {assignedUser ? (
                             <div className="flex items-center gap-2">
                               <Avatar className="h-6 w-6">
-                                <AvatarImage src={assignedUser.avatar} />
+                                <AvatarImage src={assignedUser.avatar || undefined} />
                                 <AvatarFallback>{getInitials(assignedUser.name)}</AvatarFallback>
                               </Avatar>
                               <span className="text-sm">{assignedUser.name}</span>

@@ -353,7 +353,7 @@ export default function LeadDetailPage() {
               {assignedUser ? (
                 <div className="flex items-center gap-3">
                   <Avatar>
-                    <AvatarImage src={assignedUser.avatar} />
+                    <AvatarImage src={assignedUser.avatar || undefined} />
                     <AvatarFallback>{getInitials(assignedUser.name)}</AvatarFallback>
                   </Avatar>
                   <div>

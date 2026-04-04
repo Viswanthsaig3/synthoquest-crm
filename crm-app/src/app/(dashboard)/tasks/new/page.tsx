@@ -158,7 +158,7 @@ export default function NewTaskPage() {
                     onClick={() => setFormData({ ...formData, assignedTo: emp.id })}
                   >
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={emp.avatar} />
+                      <AvatarImage src={emp.avatar || undefined} />
                       <AvatarFallback>{getInitials(emp.name)}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1">

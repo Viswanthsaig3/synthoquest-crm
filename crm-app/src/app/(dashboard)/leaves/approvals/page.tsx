@@ -110,7 +110,7 @@ export default function LeaveApprovalsPage() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar>
-                            <AvatarImage src={employee?.avatar} />
+                            <AvatarImage src={employee?.avatar || undefined} />
                             <AvatarFallback>{employee ? getInitials(employee.name) : '?'}</AvatarFallback>
                           </Avatar>
                           <span className="font-medium">{leave.employeeName}</span>

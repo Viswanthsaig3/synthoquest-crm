@@ -70,7 +70,7 @@ export default function PayslipDetailPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Avatar className="h-12 w-12">
-                <AvatarImage src={employee?.avatar} />
+                <AvatarImage src={employee?.avatar || undefined} />
                 <AvatarFallback>{employee ? getInitials(employee.name) : '?'}</AvatarFallback>
               </Avatar>
               <div>

@@ -290,7 +290,7 @@ export default function PayrollRunPage() {
                           onCheckedChange={() => handleSelectEmployee(emp.id)}
                         />
                         <Avatar className="h-8 w-8">
-                          <AvatarImage src={emp.avatar} />
+                          <AvatarImage src={emp.avatar || undefined} />
                           <AvatarFallback>{getInitials(emp.name)}</AvatarFallback>
                         </Avatar>
                         <div>
@@ -344,7 +344,7 @@ export default function PayrollRunPage() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
-                            <AvatarImage src={employee?.avatar} />
+                            <AvatarImage src={employee?.avatar || undefined} />
                             <AvatarFallback>{employee ? getInitials(employee.name) : '?'}</AvatarFallback>
                           </Avatar>
                           <span className="font-medium">{pay.employeeName}</span>

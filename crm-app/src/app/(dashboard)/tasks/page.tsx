@@ -80,7 +80,7 @@ export default function TasksPage() {
           {assignedUser && (
             <div className="flex items-center gap-2">
               <Avatar className="h-6 w-6">
-                <AvatarImage src={assignedUser.avatar} />
+                <AvatarImage src={assignedUser.avatar || undefined} />
                 <AvatarFallback className="text-xs">{getInitials(assignedUser.name)}</AvatarFallback>
               </Avatar>
               <span className="text-xs">{assignedUser.name}</span>
@@ -231,7 +231,7 @@ export default function TasksPage() {
                         {assignedUser && (
                           <div className="flex items-center gap-2">
                             <Avatar className="h-6 w-6">
-                              <AvatarImage src={assignedUser.avatar} />
+                              <AvatarImage src={assignedUser.avatar || undefined} />
                               <AvatarFallback className="text-xs">{getInitials(assignedUser.name)}</AvatarFallback>
                             </Avatar>
                           </div>

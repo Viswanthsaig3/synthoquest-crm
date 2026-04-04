@@ -205,7 +205,7 @@ export default function BatchDetailPage() {
                 {instructor && (
                   <div className="flex items-center gap-3">
                     <Avatar>
-                      <AvatarImage src={instructor.avatar} />
+                      <AvatarImage src={instructor.avatar || undefined} />
                       <AvatarFallback>{getInitials(instructor.name)}</AvatarFallback>
                     </Avatar>
                     <div>

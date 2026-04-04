@@ -316,7 +316,7 @@ export default function LeaveCalendarPage() {
                 <div key={emp.id} className="flex items-center justify-between p-3 rounded-lg border">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={emp.avatar} />
+                      <AvatarImage src={emp.avatar || undefined} />
                       <AvatarFallback>{getInitials(emp.name)}</AvatarFallback>
                     </Avatar>
                     <div>

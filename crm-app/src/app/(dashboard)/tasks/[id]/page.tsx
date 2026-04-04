@@ -238,7 +238,7 @@ export default function TaskDetailPage() {
                   return (
                     <div key={comment.id} className="flex gap-3 p-3 rounded-lg bg-muted/50">
                       <Avatar className="h-8 w-8">
-                        <AvatarImage src={commentUser?.avatar} />
+                        <AvatarImage src={commentUser?.avatar || undefined} />
                         <AvatarFallback>{commentUser ? getInitials(commentUser.name) : '?'}</AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
@@ -292,7 +292,7 @@ export default function TaskDetailPage() {
                 {assignedUser ? (
                   <div className="flex items-center gap-2 mt-2">
                     <Avatar>
-                      <AvatarImage src={assignedUser.avatar} />
+                      <AvatarImage src={assignedUser.avatar || undefined} />
                       <AvatarFallback>{getInitials(assignedUser.name)}</AvatarFallback>
                     </Avatar>
                     <div>
@@ -310,7 +310,7 @@ export default function TaskDetailPage() {
                 {createdBy && (
                   <div className="flex items-center gap-2 mt-2">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={createdBy.avatar} />
+                      <AvatarImage src={createdBy.avatar || undefined} />
                       <AvatarFallback className="text-xs">{getInitials(createdBy.name)}</AvatarFallback>
                     </Avatar>
                     <div>

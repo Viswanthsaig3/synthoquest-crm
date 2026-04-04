@@ -123,7 +123,7 @@ export default function SettingsPage() {
               <div className="flex items-center gap-6">
                 <div className="relative">
                   <Avatar className="h-20 w-20">
-                    <AvatarImage src={user.avatar} />
+                    <AvatarImage src={user.avatar || undefined} />
                     <AvatarFallback className="text-xl">{getInitials(user.name)}</AvatarFallback>
                   </Avatar>
                   <button className="absolute bottom-0 right-0 p-1 rounded-full bg-primary text-primary-foreground">

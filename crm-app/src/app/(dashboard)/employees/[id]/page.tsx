@@ -106,7 +106,7 @@ export default function EmployeeProfilePage() {
           </Link>
           <div className="flex items-center gap-4">
             <Avatar className="h-16 w-16">
-              <AvatarImage src={employee.avatar} />
+              <AvatarImage src={employee.avatar || undefined} />
               <AvatarFallback className="text-xl">{getInitials(employee.name)}</AvatarFallback>
             </Avatar>
             <div>
@@ -157,7 +157,7 @@ export default function EmployeeProfilePage() {
         />
         <StatsCard
           title="Monthly Salary"
-          value={formatCurrency(employee.salary)}
+          value={formatCurrency(employee.salary || 0)}
           icon={IndianRupee}
         />
       </div>
@@ -640,7 +640,7 @@ export default function EmployeeProfilePage() {
                 </div>
                 <div className="p-4 rounded-lg bg-green-50 border border-green-200">
                   <p className="text-xs text-green-600">Gross Salary</p>
-                  <p className="text-xl font-bold text-green-700">{formatCurrency(employee.salary)}</p>
+                  <p className="text-xl font-bold text-green-700">{formatCurrency(employee.salary || 0)}</p>
                 </div>
               </div>
             </CardContent>

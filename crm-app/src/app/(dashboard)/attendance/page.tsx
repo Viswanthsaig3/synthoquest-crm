@@ -213,7 +213,7 @@ function TeamAttendanceView({ user }: { user: typeof mockUsers[0] }) {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
-                          <AvatarImage src={employee.avatar} />
+                          <AvatarImage src={employee.avatar || undefined} />
                           <AvatarFallback>{getInitials(employee.name)}</AvatarFallback>
                         </Avatar>
                         <div>
