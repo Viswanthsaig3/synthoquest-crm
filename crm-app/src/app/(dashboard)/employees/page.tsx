@@ -1,12 +1,10 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState, TableSkeleton, PermissionGuard } from '@/components/shared'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -18,33 +16,94 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockUsers } from '@/lib/mock-data'
-import { DEPARTMENTS, ROLES } from '@/lib/constants'
-import { formatDate, getInitials, cn } from '@/lib/utils'
-import { canViewEmployees, canManageEmployees } from '@/lib/permissions'
-import { Users, Plus, Download, Eye, Edit, Mail, Phone, Calendar } from 'lucide-react'
+import { getEmployees } from '@/lib/api/employees'
+import { getRoles } from '@/lib/api/roles'
+import { getDepartments } from '@/lib/api/departments'
+import { formatDate, getInitials, getErrorMessage } from '@/lib/utils'
+import { canViewEmployees, canManageEmployees, canManageAssignedEmployees } from '@/lib/permissions'
+import { Users, Eye, Edit, Mail, Phone, Calendar, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import { useToast } from '@/components/ui/toast'
+import type { User } from '@/types/user'
 
 export default function EmployeesPage() {
   const { user } = useAuth()
+  const { toast } = useToast()
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [employees, setEmployees] = useState<User[]>([])
+  const [roleOptions, setRoleOptions] = useState<Array<{ value: string; label: string }>>([])
+  const [departmentOptions, setDepartmentOptions] = useState<Array<{ value: string; label: string }>>([])
+  const [total, setTotal] = useState(0)
+
+  useEffect(() => {
+    if (user) {
+      fetchEmployees()
+    }
+  }, [user, search, departmentFilter, roleFilter])
+
+  useEffect(() => {
+    async function loadRoles() {
+      try {
+        const response = await getRoles()
+        setRoleOptions(
+          (response.data || []).map((role) => ({
+            value: role.key,
+            label: role.name,
+          }))
+        )
+      } catch (error) {
+        console.error('Error fetching roles:', error)
+      }
+    }
+    async function loadDepartments() {
+      try {
+        const response = await getDepartments()
+        setDepartmentOptions(
+          (response.data || []).map((d) => ({
+            value: d.key,
+            label: d.name,
+          }))
+        )
+      } catch (error) {
+        console.error('Error fetching departments:', error)
+      }
+    }
+    if (user) {
+      loadRoles()
+      loadDepartments()
+    }
+  }, [user])
+
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true)
+      const response = await getEmployees({
+        search: search || undefined,
+        department: departmentFilter || undefined,
+        role: roleFilter || undefined,
+        limit: 100
+      })
+      setEmployees(response.data || [])
+      setTotal(response.pagination?.total || 0)
+    } catch (error: unknown) {
+      console.error('Error fetching employees:', error)
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to load employees'),
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (!user) return null
 
   const canAdd = canManageEmployees(user)
-
-  const filteredEmployees = useMemo(() => {
-    return mockUsers.filter(emp => {
-      const matchesSearch = emp.name.toLowerCase().includes(search.toLowerCase()) ||
-        emp.email.toLowerCase().includes(search.toLowerCase())
-      const matchesDepartment = !departmentFilter || emp.department === departmentFilter
-      const matchesRole = !roleFilter || emp.role === roleFilter
-      return matchesSearch && matchesDepartment && matchesRole
-    })
-  }, [search, departmentFilter, roleFilter])
+  const canManageAssigned = canManageAssignedEmployees(user)
 
   return (
     <PermissionGuard check={canViewEmployees} fallbackMessage="You don't have permission to view employees.">
@@ -53,12 +112,12 @@ export default function EmployeesPage() {
         
         <PageHeader
           title="Employees"
-          description={`${filteredEmployees.length} employees found`}
+          description={`${total} employees found`}
           action={canAdd ? { label: 'Add Employee', href: '/employees/new' } : undefined}
           search={{ placeholder: 'Search employees...', value: search, onChange: setSearch }}
           filters={[
-            { options: DEPARTMENTS, value: departmentFilter, onChange: setDepartmentFilter, placeholder: 'All Departments' },
-            { options: ROLES, value: roleFilter, onChange: setRoleFilter, placeholder: 'All Roles' },
+            { options: departmentOptions, value: departmentFilter, onChange: setDepartmentFilter, placeholder: 'All Departments' },
+            { options: roleOptions, value: roleFilter, onChange: setRoleFilter, placeholder: 'All Roles' },
           ]}
           exportData
         />
@@ -66,8 +125,10 @@ export default function EmployeesPage() {
         <Card>
           <CardContent className="p-0">
             {loading ? (
-              <TableSkeleton rows={10} />
-            ) : filteredEmployees.length === 0 ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : employees.length === 0 ? (
               <EmptyState
                 icon={Users}
                 title="No employees found"
@@ -87,7 +148,7 @@ export default function EmployeesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredEmployees.map((employee) => (
+                  {employees.map((employee) => (
                     <TableRow key={employee.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
@@ -128,7 +189,7 @@ export default function EmployeesPage() {
                       <TableCell className="text-sm text-muted-foreground">
                         <div className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
-                          {formatDate(new Date(employee.joinDate))}
+                          {employee.joinDate ? formatDate(new Date(employee.joinDate)) : 'N/A'}
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
@@ -138,8 +199,8 @@ export default function EmployeesPage() {
                               <Eye className="h-4 w-4" />
                             </Button>
                           </Link>
-                          {canAdd && (
-                            <Link href={`/employees/${employee.id}?edit=true`}>
+                          {(canAdd || (canManageAssigned && employee.managedBy === user.id)) && (
+                            <Link href={`/employees/${employee.id}/edit`}>
                               <Button variant="ghost" size="icon">
                                 <Edit className="h-4 w-4" />
                               </Button>

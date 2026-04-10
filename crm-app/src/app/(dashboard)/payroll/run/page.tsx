@@ -1,31 +1,29 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Select } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Progress } from '@/components/ui/progress'
-import { mockPayroll, getPayrollStats, getPayrollByMonth, getAllPayroll, getPendingPayroll } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
-import { formatCurrency, formatDate, getInitials } from '@/lib/utils'
-import { canProcessPayroll, canViewAllPayroll } from '@/lib/permissions'
-import { 
-  IndianRupee, 
-  CheckCircle, 
-  Clock, 
-  FileText, 
-  Download, 
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+
+import { formatCurrency } from '@/lib/utils'
+import { canProcessPayroll } from '@/lib/permissions'
+import {
+  IndianRupee,
+  CheckCircle,
+  Clock,
+  FileText,
   Play,
   Users,
-  AlertCircle
+  AlertCircle,
 } from 'lucide-react'
 import Link from 'next/link'
+import { fetchPayrollEligibleEmployees, fetchPayrollSummary, runPayroll, fetchEmployeeHoursData } from '@/lib/api/payroll'
+import type { EmployeeHoursData } from '@/lib/api/payroll'
 import { useToast } from '@/components/ui/toast'
 import {
   Table,
@@ -38,61 +36,92 @@ import {
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
+  'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
-const CURRENT_YEAR = 2024
+interface EligibleEmployee {
+  id: string
+  name: string
+  email: string
+  department: string
+  role: string
+  avatar: string | null
+  workerType: string
+  label: string
+  compensationAmount: number | null
+  hasSalaryStructure: boolean
+}
 
 export default function PayrollRunPage() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [selectedMonth, setSelectedMonth] = useState('January')
-  const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR)
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [employees, setEmployees] = useState<EligibleEmployee[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [totalPaid, setTotalPaid] = useState(0)
+  const [totalPending, setTotalPending] = useState(0)
+  const [hoursMap, setHoursMap] = useState<Map<string, EmployeeHoursData>>(new Map())
+
+  const loadData = useCallback(async () => {
+    if (!user) return
+    setIsLoading(true)
+    try {
+      const [empResult, summary, hoursData] = await Promise.all([
+        fetchPayrollEligibleEmployees(),
+        fetchPayrollSummary(selectedMonth, selectedYear),
+        fetchEmployeeHoursData({ month: selectedMonth, year: selectedYear }).catch(() => null),
+      ])
+      setEmployees(empResult)
+      setTotalPaid(summary.totalPaid)
+      setTotalPending(summary.totalPending)
+      if (hoursData) {
+        const map = new Map<string, EmployeeHoursData>()
+        hoursData.employees.forEach(e => map.set(e.id, e))
+        setHoursMap(map)
+      }
+    } catch (error) {
+      console.error('Failed to load payroll data:', error)
+      toast({ title: 'Error', description: 'Failed to load payroll data', variant: 'destructive' })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user, selectedMonth, selectedYear, toast])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
   if (!user) return null
 
   const canProcess = canProcessPayroll(user)
-  const canViewAll = canViewAllPayroll(user)
 
-  if (!canViewAll) {
+  if (!canProcess) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">You don't have permission to access this page.</p>
+            <p className="text-muted-foreground">{"You don't have permission to access this page."}</p>
           </CardContent>
         </Card>
       </div>
     )
   }
 
-  const stats = getPayrollStats()
-  const allPayroll = getAllPayroll()
-  const monthPayroll = getPayrollByMonth(selectedMonth, selectedYear)
-  const pendingPayroll = getPendingPayroll()
-
-  const employees = mockUsers.filter(u => u.role === 'employee' || u.role === 'sales_rep')
-
-  const selectedMonthPayroll = useMemo(() => {
-    return employees.filter(emp => 
-      !monthPayroll.some(p => p.employeeId === emp.id)
-    )
-  }, [employees, monthPayroll])
-
   const handleSelectAll = () => {
-    if (selectedEmployees.length === selectedMonthPayroll.length) {
+    if (selectedEmployees.length === employees.length) {
       setSelectedEmployees([])
     } else {
-      setSelectedEmployees(selectedMonthPayroll.map(e => e.id))
+      setSelectedEmployees(employees.map((e) => e.id))
     }
   }
 
   const handleSelectEmployee = (employeeId: string) => {
     if (selectedEmployees.includes(employeeId)) {
-      setSelectedEmployees(selectedEmployees.filter(id => id !== employeeId))
+      setSelectedEmployees(selectedEmployees.filter((id) => id !== employeeId))
     } else {
       setSelectedEmployees([...selectedEmployees, employeeId])
     }
@@ -109,29 +138,35 @@ export default function PayrollRunPage() {
     }
 
     setIsProcessing(true)
-    
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    toast({
-      title: 'Payroll processed',
-      description: `Payroll has been processed for ${selectedEmployees.length} employees.`,
-    })
-    
-    setSelectedEmployees([])
-    setIsProcessing(false)
-  }
+    try {
+      const result = await runPayroll({
+        month: selectedMonth,
+        year: selectedYear,
+        selectedUserIds: selectedEmployees,
+      })
 
-  const handleMarkPaid = (payrollId: string) => {
-    toast({
-      title: 'Payment marked as paid',
-      description: 'The payment has been marked as paid.',
-    })
+      toast({
+        title: 'Payroll processed',
+        description: `Payroll processed for ${result.records.length} employees. Total: ${formatCurrency(result.run.totalNet)}`,
+      })
+
+      setSelectedEmployees([])
+      loadData()
+    } catch (error) {
+      toast({
+        title: 'Payroll failed',
+        description: error instanceof Error ? error.message : 'Failed to process payroll',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   return (
     <div className="space-y-6">
       <Breadcrumb />
-      
+
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Payroll Management</h1>
@@ -142,14 +177,13 @@ export default function PayrollRunPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Total Paid</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalPaid)}</p>
-                <p className="text-xs text-muted-foreground">{stats.paidCount} employees</p>
+                <p className="text-sm text-muted-foreground">Already Paid</p>
+                <p className="text-2xl font-bold text-green-600">{formatCurrency(totalPaid)}</p>
               </div>
               <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
                 <CheckCircle className="h-5 w-5 text-green-600" />
@@ -161,37 +195,8 @@ export default function PayrollRunPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Processed</p>
-                <p className="text-2xl font-bold text-blue-600">{formatCurrency(stats.totalProcessed)}</p>
-                <p className="text-xs text-muted-foreground">{stats.processedCount} employees</p>
-              </div>
-              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                <Clock className="h-5 w-5 text-blue-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Pending</p>
-                <p className="text-2xl font-bold text-yellow-600">{formatCurrency(stats.totalPending)}</p>
-                <p className="text-xs text-muted-foreground">{stats.pendingCount} employees</p>
-              </div>
-              <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                <AlertCircle className="h-5 w-5 text-yellow-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Employees</p>
+                <p className="text-sm text-muted-foreground">Eligible Employees</p>
                 <p className="text-2xl font-bold">{employees.length}</p>
-                <p className="text-xs text-muted-foreground">Active</p>
               </div>
               <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
                 <Users className="h-5 w-5 text-purple-600" />
@@ -199,186 +204,168 @@ export default function PayrollRunPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {pendingPayroll.length > 0 && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="h-5 w-5 text-yellow-600" />
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium text-yellow-800">{pendingPayroll.length} payroll records pending processing</p>
-                <p className="text-sm text-yellow-600">Review and mark as processed or paid</p>
+                <p className="text-sm text-muted-foreground">Selected</p>
+                <p className="text-2xl font-bold text-blue-600">{selectedEmployees.length}</p>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <CheckCircle className="h-5 w-5 text-blue-600" />
               </div>
             </div>
           </CardContent>
         </Card>
-      )}
+      </div>
 
-      {canProcess && (
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col md:flex-row md:items-center gap-4">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Play className="h-5 w-5" />
-                  Run Payroll
-                </CardTitle>
-                <CardDescription>Generate payroll for employees</CardDescription>
-              </div>
-              <div className="flex items-center gap-2 md:ml-auto">
-                <Select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="w-36"
-                >
-                  {MONTHS.map(month => (
-                    <option key={month} value={month}>{month}</option>
-                  ))}
-                </Select>
-                <Select
-                  value={selectedYear.toString()}
-                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                  className="w-28"
-                >
-                  <option value="2024">2024</option>
-                  <option value="2023">2023</option>
-                </Select>
-              </div>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Play className="h-5 w-5" />
+                Run Payroll
+              </CardTitle>
+              <CardDescription>Select employees and generate payroll</CardDescription>
             </div>
-          </CardHeader>
-          <CardContent>
-            {selectedMonthPayroll.length === 0 ? (
-              <div className="text-center py-8">
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                <p className="text-muted-foreground">Payroll for {selectedMonth} {selectedYear} has already been generated for all employees.</p>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={selectedEmployees.length === selectedMonthPayroll.length}
-                      onCheckedChange={handleSelectAll}
-                    />
-                    <span className="text-sm font-medium">Select All</span>
-                  </div>
-                  <Button 
-                    onClick={handleRunPayroll}
-                    disabled={selectedEmployees.length === 0 || isProcessing}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Clock className="h-4 w-4 mr-2 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-4 w-4 mr-2" />
-                        Run Payroll ({selectedEmployees.length})
-                      </>
-                    )}
-                  </Button>
+            <div className="flex items-center gap-2 md:ml-auto">
+              <Select
+                value={String(selectedMonth)}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="w-36"
+              >
+                {MONTHS.map((month, i) => (
+                  <option key={month} value={i + 1}>{month}</option>
+                ))}
+              </Select>
+              <Select
+                value={String(selectedYear)}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="w-28"
+              >
+                <option value="2026">2026</option>
+                <option value="2025">2025</option>
+                <option value="2024">2024</option>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="text-center py-8 text-muted-foreground">Loading employees...</div>
+          ) : employees.length === 0 ? (
+            <div className="text-center py-8">
+              <AlertCircle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+              <p className="text-muted-foreground">No eligible employees found. Ensure employees have compensation set up.</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={selectedEmployees.length === employees.length}
+                    onCheckedChange={handleSelectAll}
+                  />
+                  <span className="text-sm font-medium">Select All ({employees.length})</span>
                 </div>
+                <Button
+                  onClick={handleRunPayroll}
+                  disabled={selectedEmployees.length === 0 || isProcessing}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Clock className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4 mr-2" />
+                      Run Payroll ({selectedEmployees.length})
+                    </>
+                  )}
+                </Button>
+              </div>
 
-                <div className="border rounded-lg divide-y">
-                  {selectedMonthPayroll.map((emp) => (
-                    <div key={emp.id} className="flex items-center justify-between p-3">
-                      <div className="flex items-center gap-3">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10"></TableHead>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Compensation</TableHead>
+                    <TableHead>Hours Worked</TableHead>
+                    <TableHead>Structure</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {employees.map((emp) => (
+                    <TableRow
+                      key={emp.id}
+                      className={selectedEmployees.includes(emp.id) ? 'bg-blue-50' : ''}
+                    >
+                      <TableCell>
                         <Checkbox
                           checked={selectedEmployees.includes(emp.id)}
                           onCheckedChange={() => handleSelectEmployee(emp.id)}
                         />
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={emp.avatar || undefined} />
-                          <AvatarFallback>{getInitials(emp.name)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">{emp.name}</p>
-                          <p className="text-xs text-muted-foreground capitalize">{emp.department}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-medium">{formatCurrency(emp.salary)}</p>
-                        <p className="text-xs text-muted-foreground">Monthly salary</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Payroll Records</CardTitle>
-          <CardDescription>View and manage processed payroll</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          {allPayroll.length === 0 ? (
-            <EmptyState
-              icon={IndianRupee}
-              title="No payroll records"
-              description="Run payroll to generate records."
-            />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Month</TableHead>
-                  <TableHead>Gross</TableHead>
-                  <TableHead>Deductions</TableHead>
-                  <TableHead>Net</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {allPayroll.slice(0, 15).map((pay) => {
-                  const employee = mockUsers.find(u => u.id === pay.employeeId)
-                  return (
-                    <TableRow key={pay.id}>
+                      </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={employee?.avatar || undefined} />
-                            <AvatarFallback>{employee ? getInitials(employee.name) : '?'}</AvatarFallback>
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-7 w-7">
+                            <AvatarFallback className="text-xs">
+                              {emp.name?.split(' ').map((n) => n[0]).join('') || '?'}
+                            </AvatarFallback>
                           </Avatar>
-                          <span className="font-medium">{pay.employeeName}</span>
+                          <div>
+                            <p className="font-medium text-sm">{emp.name}</p>
+                            <p className="text-xs text-muted-foreground">{emp.email}</p>
+                          </div>
                         </div>
                       </TableCell>
-                      <TableCell>{pay.month} {pay.year}</TableCell>
-                      <TableCell>{formatCurrency(pay.salary.gross)}</TableCell>
-                      <TableCell className="text-red-600">-{formatCurrency(pay.salary.deductions)}</TableCell>
-                      <TableCell className="font-semibold text-green-600">{formatCurrency(pay.salary.net)}</TableCell>
                       <TableCell>
-                        <StatusBadge status={pay.status} />
+                        <span className="text-xs px-2 py-1 rounded-full bg-muted">
+                          {emp.label}
+                        </span>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {pay.status === 'processed' && canProcess && (
-                            <Button variant="outline" size="sm" onClick={() => handleMarkPaid(pay.id)}>
-                              Mark Paid
-                            </Button>
-                          )}
-                          <Link href={`/payroll/${pay.id}`}>
-                            <Button variant="ghost" size="sm">
-                              View
-                            </Button>
-                          </Link>
-                          <Button variant="ghost" size="sm">
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        </div>
+                      <TableCell className="text-sm">{emp.department}</TableCell>
+                      <TableCell className="text-sm font-medium">
+                        {emp.compensationAmount ? formatCurrency(emp.compensationAmount) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {hoursMap.has(emp.id) ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">
+                              {Math.round(hoursMap.get(emp.id)!.totalHoursWorked)}h
+                            </span>
+                            <span className={`text-xs font-bold ${
+                              hoursMap.get(emp.id)!.completionPercentage >= 100 ? 'text-green-600' :
+                              hoursMap.get(emp.id)!.completionPercentage >= 80 ? 'text-blue-600' :
+                              hoursMap.get(emp.id)!.completionPercentage >= 50 ? 'text-yellow-600' :
+                              'text-red-600'
+                            }`}>
+                              {hoursMap.get(emp.id)!.completionPercentage.toFixed(0)}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {emp.hasSalaryStructure ? (
+                          <span className="text-xs text-green-600">Configured</span>
+                        ) : (
+                          <span className="text-xs text-yellow-600">
+                            {emp.workerType === 'paid_intern' ? 'Stipend-based' : 'Not set'}
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
           )}
         </CardContent>
       </Card>

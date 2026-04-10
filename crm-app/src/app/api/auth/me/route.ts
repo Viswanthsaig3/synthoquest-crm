@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { getUserById } from '@/lib/db/queries/users'
+import { getUserPermissions } from '@/lib/db/queries/permissions'
 
 export async function GET(request: NextRequest) {
   return withAuth(request, async (user) => {
@@ -19,10 +20,14 @@ export async function GET(request: NextRequest) {
         email: userData.email,
         name: userData.name,
         role: userData.role,
+        permissions: await getUserPermissions(userData.id),
         department: userData.department,
         phone: userData.phone,
         avatar: userData.avatar,
         status: userData.status,
+        managedBy: userData.managedBy,
+        // SECURITY: CRIT-04 — Compensation data stripped from /me response.
+        // Access via /api/users/[id]/compensation with compensation.manage permission.
         lastLoginAt: userData.lastLoginAt,
       }
 

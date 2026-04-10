@@ -15,12 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockPayments, mockStudents } from '@/lib/mock-data'
+
 import { PAYMENT_STATUSES, PAYMENT_METHODS, COURSES } from '@/lib/constants'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { canViewAllPayments, canViewAssignedPayments, canCreatePayment } from '@/lib/permissions'
 import { CreditCard, Eye, Download, Plus, IndianRupee, Calendar } from 'lucide-react'
 import Link from 'next/link'
+import type { Payment } from '@/types/payment'
 
 export default function PaymentsPage() {
   const { user } = useAuth()
@@ -32,26 +33,13 @@ export default function PaymentsPage() {
 
   const canView = canViewAllPayments(user) || canViewAssignedPayments(user)
 
-  const visiblePayments = useMemo(() => {
-    if (!user) return []
-    return canViewAllPayments(user) ? mockPayments : mockPayments.filter(p => p.collectedBy === user.id)
-  }, [user])
+  const visiblePayments: Payment[] = []
 
-  const filteredPayments = useMemo(() => {
-    return visiblePayments.filter(payment => {
-      const matchesSearch = payment.studentName.toLowerCase().includes(search.toLowerCase()) ||
-        payment.receiptNumber.toLowerCase().includes(search.toLowerCase()) ||
-        payment.courseName.toLowerCase().includes(search.toLowerCase())
-      const matchesStatus = !statusFilter || payment.status === statusFilter
-      const matchesMethod = !methodFilter || payment.method === methodFilter
-      return matchesSearch && matchesStatus && matchesMethod
-    })
-  }, [visiblePayments, search, statusFilter, methodFilter])
+  const filteredPayments: Payment[] = []
 
+  const totalAmount = 0
+  const paidAmount = 0
   const canAdd = canCreatePayment(user)
-
-  const totalAmount = filteredPayments.reduce((sum, p) => sum + p.amount, 0)
-  const paidAmount = filteredPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {

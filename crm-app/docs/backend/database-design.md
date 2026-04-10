@@ -48,7 +48,7 @@ Format: idx_{table}_{columns}
 Examples:
 - idx_users_email
 - idx_tasks_assigned_to
-- idx_timesheets_employee_week
+- idx_timesheets_employee_date
 ```
 
 ### Constraints
@@ -287,15 +287,15 @@ Partial Index:
 Order matters: Most selective first
 
 Example: Timesheet queries
-CREATE INDEX idx_timesheets_employee_week 
-ON timesheets(employee_id, week_start_date);
+CREATE INDEX idx_timesheets_employee_date
+ON timesheets(employee_id, work_date);
 
 Query benefits:
-WHERE employee_id = ? AND week_start_date = ?
+WHERE employee_id = ? AND work_date = ?
 WHERE employee_id = ?
 
 Does NOT help:
-WHERE week_start_date = ?
+WHERE work_date = ?
 ```
 
 ### Index Guidelines
@@ -342,7 +342,7 @@ Single column:
 email VARCHAR(255) UNIQUE
 
 Multiple columns:
-CONSTRAINT uq_timesheet_week UNIQUE(employee_id, week_start_date)
+CONSTRAINT uq_timesheet_day UNIQUE(employee_id, work_date)
 
 Partial unique (with soft delete):
 CREATE UNIQUE INDEX uq_user_email 

@@ -19,12 +19,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockStudents, mockPayments, mockCertificates, mockUsers } from '@/lib/mock-data'
+
 import { STUDENT_STATUSES, ENROLLMENT_STATUSES, PAYMENT_METHODS } from '@/lib/constants'
 import { formatDate, getInitials, formatCurrency } from '@/lib/utils'
 import { canEditStudent, canEnrollStudent } from '@/lib/permissions'
 import {
-  User,
+  User as UserIcon,
   Mail,
   Phone,
   MapPin,
@@ -44,6 +44,18 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import Link from 'next/link'
+import type { Student, Enrollment } from '@/types/student'
+import type { Payment } from '@/types/payment'
+import type { Certificate } from '@/types/certificate'
+import type { User as EmployeeUser } from '@/types/user'
+
+function getStudentDetailStub(): Student | null {
+  return null
+}
+
+function getConvertedByUserStub(): EmployeeUser | null {
+  return null
+}
 
 export default function StudentDetailPage() {
   const params = useParams()
@@ -51,10 +63,10 @@ export default function StudentDetailPage() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('overview')
 
-  const student = mockStudents.find(s => s.id === params.id)
-  const payments = mockPayments.filter(p => p.studentId === params.id)
-  const certificates = mockCertificates.filter(c => c.studentId === params.id)
-  const convertedByUser = mockUsers.find(u => u.id === student?.convertedBy)
+  const student = getStudentDetailStub()
+  const payments: Payment[] = []
+  const certificates: Certificate[] = []
+  const convertedByUser = getConvertedByUserStub()
 
   if (!user || !student) {
     return (
@@ -159,7 +171,7 @@ export default function StudentDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {student.enrollments.filter(e => e.status === 'in_progress' || e.status === 'enrolled').length}
+              {student.enrollments.filter((e: Enrollment) => e.status === 'in_progress' || e.status === 'enrolled').length}
             </div>
           </CardContent>
         </Card>
@@ -186,7 +198,7 @@ export default function StudentDetailPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <User className="h-5 w-5" />
+                  <UserIcon className="h-5 w-5" />
                   Personal Information
                 </CardTitle>
               </CardHeader>
@@ -292,7 +304,7 @@ export default function StudentDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {student.enrollments.map((enrollment) => (
+                    {student.enrollments.map((enrollment: Enrollment) => (
                       <TableRow key={enrollment.id}>
                         <TableCell>
                           <div>

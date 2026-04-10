@@ -7,6 +7,7 @@ export interface Intern {
   name: string
   email: string
   phone: string
+  managedBy?: string | null
   alternatePhone?: string
   
   // Internship Details
@@ -50,6 +51,8 @@ export interface Intern {
   
   // Stipend (for paid interns)
   stipend?: number
+  compensationType?: 'paid' | 'unpaid'
+  compensationAmount?: number | null
   
   // Notes
   notes: string

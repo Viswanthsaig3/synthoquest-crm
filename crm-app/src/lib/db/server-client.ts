@@ -1,8 +1,10 @@
-import { createServerClient, createBrowserClient } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
+import { getServerEnv } from '@/lib/env'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const env = getServerEnv()
+const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY
 
 export async function createClient() {
   const { cookies: nextCookies } = await import('next/headers')
@@ -19,7 +21,6 @@ export async function createClient() {
             cookieStore.set(name, value, options)
           )
         } catch {
-          // Called from Server Component, ignore
         }
       },
     },
@@ -41,13 +42,8 @@ export async function createAdminClient() {
             cookieStore.set(name, value, options)
           )
         } catch {
-          // Called from Server Component, ignore
         }
       },
     },
   })
-}
-
-export function createBrowserClientInstance() {
-  return createBrowserClient(supabaseUrl, supabaseAnonKey)
 }

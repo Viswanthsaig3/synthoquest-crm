@@ -1,12 +1,9 @@
 import { SignJWT, jwtVerify } from 'jose'
+import { getServerEnv } from '@/lib/env'
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fallback-secret-key-change-in-production-min-32-chars'
-)
-
-const JWT_REFRESH_SECRET = new TextEncoder().encode(
-  process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret-key-change-in-production'
-)
+const env = getServerEnv()
+const JWT_SECRET = new TextEncoder().encode(env.JWT_SECRET)
+const JWT_REFRESH_SECRET = new TextEncoder().encode(env.JWT_REFRESH_SECRET)
 
 export interface JWTPayload {
   userId: string
@@ -27,7 +24,7 @@ export interface RefreshTokenPayload {
 
 export async function generateAccessToken(payload: JWTPayload): Promise<string> {
   const iat = Math.floor(Date.now() / 1000)
-  const exp = iat + 15 * 60 // 15 minutes
+  const exp = iat + 4 * 60 * 60 // 4 hours (refresh cookie still renews session)
 
   return new SignJWT({
     userId: payload.userId,

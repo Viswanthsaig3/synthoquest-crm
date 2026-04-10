@@ -3,7 +3,7 @@ import { withAuth } from '@/lib/auth/middleware'
 import { changeUserRole, getRoleByKey } from '@/lib/db/queries/roles'
 import { getUserById } from '@/lib/db/queries/users'
 import { revokeAllUserTokens } from '@/lib/db/queries/refresh-tokens'
-import { hasPermissionStatic } from '@/lib/permissions'
+import { hasPermission, isAdmin } from '@/lib/auth/authorization'
 import { permissionCache } from '@/lib/permissions-cache'
 import { z } from 'zod'
 
@@ -15,11 +15,10 @@ const changeRoleSchema = z.object({
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   return withAuth(request, async (user) => {
     try {
-      const canManage = hasPermissionStatic({ role: user.role } as any, 'employees.manage')
-      
-      if (!canManage) {
+      const canManage = await hasPermission(user, 'employees.manage')
+      if (!canManage || !isAdmin(user)) {
         return NextResponse.json(
-          { error: 'Forbidden' },
+          { error: 'Only admin can assign roles' },
           { status: 403 }
         )
       }
@@ -54,9 +53,16 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       }
 
       // Prevent demoting admin unless admin
-      if (targetUser.role === 'admin' && user.role !== 'admin') {
+      if (targetUser.role === 'admin' && !isAdmin(user)) {
         return NextResponse.json(
           { error: 'Only admin can demote other admins' },
+          { status: 403 }
+        )
+      }
+
+      if (validated.role === 'admin' && !isAdmin(user)) {
+        return NextResponse.json(
+          { error: 'Only admin can promote users to admin' },
           { status: 403 }
         )
       }

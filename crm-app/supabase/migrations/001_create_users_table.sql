@@ -2,7 +2,7 @@
 -- Migration 001: Create Users Table
 
 -- Create enum types
-CREATE TYPE user_role AS ENUM ('admin', 'hr', 'team_lead', 'sales_rep', 'employee');
+CREATE TYPE user_role AS ENUM ('admin', 'hr', 'team_lead', 'sales_rep', 'employee', 'intern');
 CREATE TYPE employee_status AS ENUM ('active', 'inactive', 'suspended');
 
 -- Create users table

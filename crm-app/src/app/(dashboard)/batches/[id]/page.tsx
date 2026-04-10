@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockBatches, mockStudents, mockUsers } from '@/lib/mock-data'
+
 import { formatDate, formatCurrency, getInitials } from '@/lib/utils'
 import { canEditBatch, canManageBatch } from '@/lib/permissions'
 import {
@@ -37,16 +37,25 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import type { Batch, BatchSchedule } from '@/types/batch'
+import type { Student, Enrollment } from '@/types/student'
+import type { User as AppUser } from '@/types/user'
+
+function getBatchDetailStub(): Batch | null {
+  return null
+}
+
+function getInstructorStub(): AppUser | null {
+  return null
+}
 
 export default function BatchDetailPage() {
   const params = useParams()
   const { user } = useAuth()
 
-  const batch = mockBatches.find(b => b.id === params.id)
-  const instructor = mockUsers.find(u => u.id === batch?.instructorId)
-  const studentsInBatch = mockStudents.filter(s => 
-    s.enrollments.some(e => e.batchId === params.id)
-  )
+  const batch = getBatchDetailStub()
+  const instructor = getInstructorStub()
+  const studentsInBatch: Student[] = []
 
   if (!user || !batch) {
     return (
@@ -183,7 +192,7 @@ export default function BatchDetailPage() {
                 <div className="border-t pt-4">
                   <p className="text-sm text-muted-foreground mb-2">Class Schedule</p>
                   <div className="space-y-2">
-                    {batch.schedule.map((s, i) => (
+                    {batch.schedule.map((s: BatchSchedule, i: number) => (
                       <div key={i} className="flex items-center gap-2">
                         <Badge variant="outline" className="capitalize">{s.day}</Badge>
                         <span className="text-sm">{s.startTime} - {s.endTime}</span>
@@ -241,7 +250,7 @@ export default function BatchDetailPage() {
                   <div className="border-t pt-4">
                     <p className="text-sm text-muted-foreground mb-2">Prerequisites</p>
                     <ul className="list-disc list-inside space-y-1">
-                      {batch.prerequisites.map((p, i) => (
+                      {batch.prerequisites.map((p: string, i: number) => (
                         <li key={i} className="text-sm">{p}</li>
                       ))}
                     </ul>
@@ -286,7 +295,7 @@ export default function BatchDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {studentsInBatch.map((student) => {
-                      const enrollment = student.enrollments.find(e => e.batchId === batch.id)
+                      const enrollment = student.enrollments.find((e: Enrollment) => e.batchId === batch.id)
                       return (
                         <TableRow key={student.id}>
                           <TableCell>
@@ -346,7 +355,7 @@ export default function BatchDetailPage() {
               </CardHeader>
               <CardContent>
                 <ol className="list-decimal list-inside space-y-2">
-                  {batch.syllabus.map((topic, i) => (
+                  {batch.syllabus.map((topic: string, i: number) => (
                     <li key={i} className="text-sm py-2 border-b last:border-0">{topic}</li>
                   ))}
                 </ol>

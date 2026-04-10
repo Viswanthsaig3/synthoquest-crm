@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { getUserRoleHistory } from '@/lib/db/queries/roles'
 import { getUserById } from '@/lib/db/queries/users'
-import { hasPermissionStatic } from '@/lib/permissions'
+import { hasPermission } from '@/lib/auth/authorization'
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   return withAuth(request, async (user) => {
     try {
-      const canViewAll = hasPermissionStatic({ role: user.role } as any, 'employees.view_all')
+      const canViewAll = await hasPermission(user, 'employees.view_all')
       const isOwnProfile = params.id === user.userId
 
       if (!canViewAll && !isOwnProfile) {

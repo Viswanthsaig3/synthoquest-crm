@@ -2,13 +2,11 @@
 
 import React, { useState } from 'react'
 import { useAuth } from '@/context/auth-context'
-import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/components/ui/toast'
-import { mockLeadTypes, getLeadTypeStats } from '@/lib/mock-data/lead-types'
 import { LEAD_TYPE_ICONS, LEAD_TYPE_COLORS } from '@/lib/constants'
 import { canManageSettings } from '@/lib/permissions'
 import { 
@@ -28,6 +26,7 @@ import {
   Copy
 } from 'lucide-react'
 import Link from 'next/link'
+import type { LeadType, LeadTypeSource, LeadTypeStatus } from '@/types/lead-type'
 
 const iconMap: Record<string, React.ElementType> = {
   GraduationCap,
@@ -39,6 +38,10 @@ const iconMap: Record<string, React.ElementType> = {
   UserPlus,
   Star,
 }
+
+const mockLeadTypes: LeadType[] = []
+
+const getLeadTypeStats = (): Record<string, { total: number; active: number; converted: number }> => ({})
 
 export default function LeadTypesPage() {
   const { user } = useAuth()
@@ -52,7 +55,6 @@ export default function LeadTypesPage() {
   if (!canManage) {
     return (
       <div className="space-y-6">
-        <Breadcrumb />
         <Card>
           <CardContent className="py-12 text-center">
             <Settings className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
@@ -104,8 +106,6 @@ export default function LeadTypesPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumb />
-      
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Lead Types</h1>
@@ -205,7 +205,7 @@ export default function LeadTypesPage() {
                   <div>
                     <p className="text-sm font-medium mb-2">Workflow Statuses</p>
                     <div className="flex flex-wrap gap-2">
-                      {leadType.statuses.map((status) => (
+                      {leadType.statuses.map((status: LeadTypeStatus) => (
                         <Badge 
                           key={status.id} 
                           variant="outline"
@@ -226,7 +226,7 @@ export default function LeadTypesPage() {
                   <div>
                     <p className="text-sm font-medium mb-2">Sources</p>
                     <div className="flex flex-wrap gap-2">
-                      {leadType.sources.map((source) => (
+                      {leadType.sources.map((source: LeadTypeSource) => (
                         <Badge key={source.id} variant="secondary">
                           {source.label}
                         </Badge>

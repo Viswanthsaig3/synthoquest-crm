@@ -18,8 +18,8 @@ Implement a comprehensive timesheet management system with submission, approval 
 - Break time tracking
 - Notes and comments
 
-### 2. Weekly Timesheet
-- Weekly view of entries
+### 2. Daily Timesheet
+- Daily view of entries
 - Auto-calculation of hours
 - Validation of entries
 - Draft/Submitted states
@@ -47,8 +47,7 @@ Table: timesheets
 Fields:
 - id: UUID, primary key
 - employee_id: UUID, foreign key to users.id, not null
-- week_start_date: DATE, not null
-- week_end_date: DATE, not null
+- work_date: DATE, not null
 - total_hours: DECIMAL(5,2), default 0
 - regular_hours: DECIMAL(5,2), default 0
 - overtime_hours: DECIMAL(5,2), default 0
@@ -71,17 +70,15 @@ Fields:
 
 Indexes:
 - idx_timesheets_employee_id on employee_id
-- idx_timesheets_week_start on week_start_date
+- idx_timesheets_work_date on work_date
 - idx_timesheets_status on status
-- idx_timesheets_employee_week on (employee_id, week_start_date)
+- idx_timesheets_employee_date on (employee_id, work_date)
 
 Constraints:
 - employee_id must exist in users table
-- week_start_date must be Monday
-- week_end_date must be Sunday
-- week_end_date = week_start_date + 6 days
+- one daily timesheet per employee per work_date
 - status must be one of defined values
-- unique (employee_id, week_start_date, deleted_at)
+- unique (employee_id, work_date, deleted_at)
 ```
 
 ### Timesheet Entries Table
@@ -111,7 +108,7 @@ Indexes:
 
 Constraints:
 - timesheet_id must exist in timesheets table
-- date must be within timesheet week
+- date must match timesheet work date
 - total_hours must be positive
 - Cascade delete on timesheet delete
 ```
@@ -236,7 +233,7 @@ Query Parameters:
 - limit: integer
 - status: string (draft, submitted, approved, rejected)
 - employee_id: string (admin/HR only)
-- week_start: date (YYYY-MM-DD)
+- work_date: date (YYYY-MM-DD)
 - from_date: date
 - to_date: date
 
@@ -257,7 +254,7 @@ Response (200):
   "data": [
     {
       "id": "uuid",
-      "week_start_date": "2026-04-07",
+      "work_date": "2026-04-07",
       "total_hours": 40.5,
       "status": "submitted",
       "employee": { "id": "...", "name": "..." },
@@ -273,7 +270,7 @@ Errors:
 
 #### POST /api/timesheets
 ```
-Purpose: Create new timesheet for a week
+Purpose: Create new daily timesheet
 
 Headers:
 - Authorization: Bearer {accessToken}
@@ -282,28 +279,26 @@ Permission: timesheets.submit (or own)
 
 Request Body:
 {
-  "week_start_date": "2026-04-07",
+  "work_date": "2026-04-07",
   "notes": "Optional notes"
 }
 
 Validation:
-- week_start_date must be Monday
-- No existing timesheet for same week (unless deleted)
-- Week is not too far in past/future
+- work_date is required
+- No existing timesheet for same employee/day (unless deleted)
+- work_date cannot be invalid
 
 Process:
 1. Verify authentication
 2. Validate input
-3. Calculate week_end_date
-4. Create timesheet
+3. Create timesheet
 5. Return timesheet
 
 Response (201):
 {
   "data": {
     "id": "uuid",
-    "week_start_date": "2026-04-07",
-    "week_end_date": "2026-04-13",
+    "work_date": "2026-04-07",
     "status": "draft",
     ...
   }
@@ -338,8 +333,7 @@ Response (200):
 {
   "data": {
     "id": "uuid",
-    "week_start_date": "2026-04-07",
-    "week_end_date": "2026-04-13",
+    "work_date": "2026-04-07",
     "total_hours": 40.5,
     "regular_hours": 40,
     "overtime_hours": 0.5,
@@ -582,7 +576,7 @@ Request Body:
 
 Validation:
 - Timesheet in 'draft' status
-- Date within timesheet week
+- Date must match timesheet work date
 - start_time < end_time
 - total_hours calculated correctly
 
@@ -679,10 +673,10 @@ Errors:
 Regular Hours: Up to 8 hours per day
 Overtime Hours: Hours > 8 per day
 
-Weekly Calculation:
-- Total Hours = Sum of all daily hours
-- Regular Hours = Min(Total, 40)
-- Overtime Hours = Max(0, Total - 40)
+Daily Calculation:
+- Total Hours = Sum of all entries on work_date
+- Regular Hours = Min(Total, 8)
+- Overtime Hours = Max(0, Total - 8)
 
 Daily Calculation:
 - total_hours = end_time - start_time - break_minutes
@@ -794,10 +788,10 @@ Format:
 ## Testing Checklist
 
 ### Timesheet Creation Tests
-- [ ] Create timesheet for valid week
+- [ ] Create timesheet for valid date
 - [ ] Cannot create duplicate timesheet
-- [ ] Week start must be Monday
-- [ ] Cannot create for far future
+- [ ] Cannot create for invalid date
+- [ ] Cannot create for far future/past if policy enforces
 
 ### Entry Tests
 - [ ] Add entry with valid data
@@ -820,7 +814,7 @@ Format:
 - [ ] Total hours calculation
 - [ ] Regular/overtime split
 - [ ] Break time deduction
-- [ ] Weekly totals update
+- [ ] Daily totals update
 
 ### Approval Tests
 - [ ] Manager can approve team member

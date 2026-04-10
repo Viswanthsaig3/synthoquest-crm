@@ -15,13 +15,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockCertificates, mockStudents } from '@/lib/mock-data'
+
 import { CERTIFICATE_TYPES, CERTIFICATE_STATUSES } from '@/lib/constants'
 import { formatDate } from '@/lib/utils'
 import { canViewAllCertificates, canIssueCertificate } from '@/lib/permissions'
 import { Award, Eye, Download, Plus, Search, ExternalLink, Shield } from 'lucide-react'
 import Link from 'next/link'
 import { Input } from '@/components/ui/input'
+import type { Certificate } from '@/types/certificate'
 
 export default function CertificatesPage() {
   const { user } = useAuth()
@@ -32,15 +33,7 @@ export default function CertificatesPage() {
 
   const canIssue = canIssueCertificate(user)
 
-  const filteredCertificates = useMemo(() => {
-    return mockCertificates.filter(cert => {
-      const matchesSearch = cert.studentName.toLowerCase().includes(search.toLowerCase()) ||
-        cert.certificateNumber.toLowerCase().includes(search.toLowerCase()) ||
-        cert.courseName.toLowerCase().includes(search.toLowerCase())
-      const matchesType = !typeFilter || cert.type === typeFilter
-      return matchesSearch && matchesType
-    })
-  }, [search, typeFilter])
+  const filteredCertificates: Certificate[] = []
 
   const getTypeColor = (type: string) => {
     const colors: Record<string, string> = {

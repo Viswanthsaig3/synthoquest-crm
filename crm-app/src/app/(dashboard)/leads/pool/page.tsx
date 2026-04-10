@@ -1,17 +1,18 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, EmptyState, PermissionGuard } from '@/components/shared'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { getUnclaimedLeads, mockLeads } from '@/lib/mock-data/leads'
+import { getLeads, claimLead } from '@/lib/api/leads'
 import { formatDate } from '@/lib/utils'
-import { canClaimLead, canCallLead } from '@/lib/permissions'
+import { canClaimLead } from '@/lib/permissions'
 import { COURSE_FEES } from '@/lib/constants'
-import { Users, Phone, Flame, Zap, Snowflake, Clock, GraduationCap, AlertCircle } from 'lucide-react'
+import type { Lead } from '@/lib/db/queries/leads'
+import { Users, Phone, Flame, Zap, Snowflake, Clock, GraduationCap, AlertCircle, Loader2 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { useRouter } from 'next/navigation'
 
@@ -20,11 +21,30 @@ export default function LeadPoolPage() {
   const { toast } = useToast()
   const router = useRouter()
   const [claimingLeadId, setClaimingLeadId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [leads, setLeads] = useState<Lead[]>([])
 
-  if (!user) return null
+  useEffect(() => {
+    async function fetchLeads() {
+      try {
+        setLoading(true)
+        const result = await getLeads()
+        setLeads(result.data)
+      } catch (error) {
+        console.error('Failed to fetch leads:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load leads. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchLeads()
+  }, [toast])
 
-  const canClaim = canClaimLead(user)
-  const unclaimedLeads = getUnclaimedLeads()
+  const unclaimedLeads = leads.filter(l => !l.assignedTo)
 
   const sortedLeads = useMemo(() => {
     return [...unclaimedLeads].sort((a, b) => {
@@ -32,6 +52,10 @@ export default function LeadPoolPage() {
       return priorityOrder[a.priority] - priorityOrder[b.priority]
     })
   }, [unclaimedLeads])
+
+  if (!user) return null
+
+  const canClaim = canClaimLead(user)
 
   const handleClaimAndCall = async (leadId: string) => {
     if (!canClaim) {
@@ -45,14 +69,25 @@ export default function LeadPoolPage() {
 
     setClaimingLeadId(leadId)
     
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
-    toast({
-      title: 'Lead claimed',
-      description: 'Redirecting to call page...',
-    })
+    try {
+      await claimLead(leadId)
+      
+      toast({
+        title: 'Lead claimed',
+        description: 'Redirecting to call page...',
+      })
 
-    router.push(`/leads/${leadId}?action=call`)
+      router.push(`/leads/${leadId}?action=call`)
+    } catch (error) {
+      console.error('Failed to claim lead:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to claim lead. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setClaimingLeadId(null)
+    }
   }
 
   const getPriorityIcon = (priority: string) => {
@@ -73,9 +108,10 @@ export default function LeadPoolPage() {
     }
   }
 
-  const getTimeSinceCreated = (date: Date) => {
+  const getTimeSinceCreated = (date: string) => {
     const now = new Date()
-    const diff = now.getTime() - date.getTime()
+    const created = new Date(date)
+    const diff = now.getTime() - created.getTime()
     const hours = Math.floor(diff / (1000 * 60 * 60))
     const days = Math.floor(hours / 24)
     
@@ -94,7 +130,13 @@ export default function LeadPoolPage() {
         description={`${unclaimedLeads.length} unclaimed leads available`}
       />
 
-      {unclaimedLeads.length === 0 ? (
+      {loading ? (
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      ) : unclaimedLeads.length === 0 ? (
         <Card>
           <CardContent className="py-12">
             <EmptyState

@@ -6,6 +6,7 @@ export interface Role {
   name: string
   description: string | null
   isSystem: boolean
+  archivedAt?: string | null
   createdAt: string
   updatedAt: string
   permissions?: string[]
@@ -17,16 +18,30 @@ export async function getAllRoles(): Promise<Role[]> {
   const { data, error } = await supabase
     .from('roles')
     .select('*')
+    .is('archived_at', null)
     .order('key')
 
   if (error) throw error
 
-  return data.map((role: any) => ({
-    ...role,
+  return data.map((role: {
+    id: string
+    key: string
+    name: string
+    description: string | null
+    is_system: boolean
+    archived_at?: string | null
+    created_at: string
+    updated_at: string
+  }) => ({
+    id: role.id,
+    key: role.key,
+    name: role.name,
+    description: role.description,
     isSystem: role.is_system,
+    archivedAt: role.archived_at,
     createdAt: role.created_at,
     updatedAt: role.updated_at,
-  })) as Role[]
+  }))
 }
 
 export async function getRoleByKey(key: string): Promise<Role | null> {
@@ -36,6 +51,7 @@ export async function getRoleByKey(key: string): Promise<Role | null> {
     .from('roles')
     .select('*')
     .eq('key', key)
+    .is('archived_at', null)
     .single()
 
   if (error) {
@@ -46,6 +62,7 @@ export async function getRoleByKey(key: string): Promise<Role | null> {
   return {
     ...data,
     isSystem: data.is_system,
+    archivedAt: data.archived_at,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   } as Role
@@ -72,7 +89,9 @@ export async function getRoleWithPermissions(key: string): Promise<Role | null> 
 
   return {
     ...role,
-    permissions: rolePermissions.map((rp: any) => rp.permission.key),
+    permissions: (rolePermissions as unknown as { permission: { key: string } }[]).map(
+      (rp) => rp.permission.key
+    ),
   }
 }
 
@@ -85,6 +104,9 @@ export async function updateRolePermissions(
   
   const role = await getRoleByKey(roleKey)
   if (!role) throw new Error('Role not found')
+  if (role.key === 'admin') {
+    throw new Error('Cannot modify admin permissions')
+  }
 
   // Get permission IDs
   const { data: permissions, error: permError } = await supabase
@@ -98,7 +120,7 @@ export async function updateRolePermissions(
     throw new Error('Some permissions not found')
   }
 
-  const permissionIds = permissions.map((p: any) => p.id)
+  const permissionIds = permissions.map((p: { id: string }) => p.id)
 
   // Start transaction-like operation
   // Delete existing permissions
@@ -116,11 +138,13 @@ export async function updateRolePermissions(
     created_by: createdBy,
   }))
 
-  const { error: insertError } = await supabase
-    .from('role_permissions')
-    .insert(inserts)
+  if (inserts.length > 0) {
+    const { error: insertError } = await supabase
+      .from('role_permissions')
+      .insert(inserts)
 
-  if (insertError) throw insertError
+    if (insertError) throw insertError
+  }
 
   // Return updated role
   return (await getRoleWithPermissions(roleKey))!
@@ -136,7 +160,12 @@ export async function createRole(role: {
   
   const { data, error } = await supabase
     .from('roles')
-    .insert(role)
+    .insert({
+      key: role.key,
+      name: role.name,
+      description: role.description ?? null,
+      is_system: role.isSystem ?? false,
+    })
     .select()
     .single()
 
@@ -145,24 +174,61 @@ export async function createRole(role: {
   return {
     ...data,
     isSystem: data.is_system,
+    archivedAt: data.archived_at,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   } as Role
 }
 
-export async function deleteRole(key: string): Promise<void> {
+export async function updateRole(
+  key: string,
+  updates: {
+    name?: string
+    description?: string | null
+  }
+): Promise<Role> {
+  const supabase = await createAdminClient()
+  const role = await getRoleByKey(key)
+  if (!role) throw new Error('Role not found')
+  if (role.key === 'admin') throw new Error('Cannot modify admin role')
+
+  const { data, error } = await supabase
+    .from('roles')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', role.id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return {
+    ...data,
+    isSystem: data.is_system,
+    archivedAt: data.archived_at,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  } as Role
+}
+
+export async function archiveRole(key: string): Promise<void> {
   const supabase = await createAdminClient()
   
   const role = await getRoleByKey(key)
   if (!role) throw new Error('Role not found')
 
-  if (role.isSystem) {
-    throw new Error('Cannot delete system roles')
+  if (role.key === 'admin') {
+    throw new Error('Cannot archive admin role')
   }
 
   const { error } = await supabase
     .from('roles')
-    .delete()
+    .update({
+      archived_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', role.id)
 
   if (error) throw error
@@ -222,7 +288,16 @@ export async function changeUserRole(
   if (auditError) throw auditError
 }
 
-export async function getUserRoleHistory(userId: string): Promise<any[]> {
+export interface UserRoleAuditEntry {
+  id: string
+  oldRole: string
+  newRole: string
+  reason: string | null
+  changedAt: string
+  changedBy: { id: string; name: string; email: string } | null
+}
+
+export async function getUserRoleHistory(userId: string): Promise<UserRoleAuditEntry[]> {
   const supabase = await createAdminClient()
   
   const { data, error } = await supabase
@@ -244,7 +319,15 @@ export async function getUserRoleHistory(userId: string): Promise<any[]> {
 
   if (error) throw error
 
-  return data.map((audit: any) => ({
+  type AuditRow = {
+    id: string
+    old_role: string
+    new_role: string
+    reason: string | null
+    changed_at: string
+    changer: { id: string; name: string; email: string } | null
+  }
+  return (data as unknown as AuditRow[]).map((audit) => ({
     id: audit.id,
     oldRole: audit.old_role,
     newRole: audit.new_role,

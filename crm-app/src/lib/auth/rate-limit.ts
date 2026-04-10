@@ -1,14 +1,13 @@
-import { LRUCache } from 'lru-cache'
-
-interface RateLimitEntry {
-  attempts: number
-  lockedUntil: number | null
-}
-
-const loginAttempts = new LRUCache<string, RateLimitEntry>({
-  max: 10000,
-  ttl: 15 * 60 * 1000, // 15 minutes
-})
+/**
+ * SECURITY: CRIT-07 — Database-backed login rate limiting.
+ *
+ * Replaces the previous in-memory LRUCache implementation which was
+ * per-process and reset on every serverless cold start.
+ *
+ * Uses Supabase RPCs for atomic check-and-increment, ensuring rate
+ * limits persist across deployments and scale across instances.
+ */
+import { createAdminClient } from '@/lib/db/client'
 
 export interface RateLimitResult {
   allowed: boolean
@@ -17,56 +16,48 @@ export interface RateLimitResult {
   locked: boolean
 }
 
-export function checkLoginRateLimit(ip: string): RateLimitResult {
-  const now = Date.now()
-  const entry = loginAttempts.get(ip)
+export async function checkLoginRateLimit(ip: string): Promise<RateLimitResult> {
+  try {
+    const supabase = await createAdminClient()
+    const { data, error } = await supabase.rpc('check_login_rate_limit', {
+      p_ip: ip,
+    })
 
-  if (!entry) {
-    loginAttempts.set(ip, { attempts: 1, lockedUntil: null })
-    return {
-      allowed: true,
-      remaining: 4,
-      resetAt: now + 15 * 60 * 1000,
-      locked: false,
+    if (error) {
+      console.error('Rate limit check failed, failing open:', error)
+      // Fail-open: allow login if rate limit check fails
+      return { allowed: true, remaining: 5, resetAt: null, locked: false }
     }
-  }
 
-  if (entry.lockedUntil && now < entry.lockedUntil) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: entry.lockedUntil,
-      locked: true,
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row) {
+      return { allowed: true, remaining: 5, resetAt: null, locked: false }
     }
-  }
 
-  if (entry.attempts >= 10) {
-    const lockedUntil = now + 30 * 60 * 1000 // 30 minutes lockout
-    loginAttempts.set(ip, { attempts: entry.attempts + 1, lockedUntil })
+    const locked = !row.allowed
     return {
-      allowed: false,
-      remaining: 0,
-      resetAt: lockedUntil,
-      locked: true,
+      allowed: row.allowed,
+      remaining: Math.max(0, 10 - row.attempts_count),
+      resetAt: row.locked_until_ts ? new Date(row.locked_until_ts).getTime() : null,
+      locked,
     }
-  }
-
-  const newAttempts = entry.attempts + 1
-  loginAttempts.set(ip, { attempts: newAttempts, lockedUntil: null })
-
-  return {
-    allowed: true,
-    remaining: Math.max(0, 5 - newAttempts),
-    resetAt: now + 15 * 60 * 1000,
-    locked: false,
+  } catch (err) {
+    console.error('Rate limit check error, failing open:', err)
+    // Fail-open on unexpected errors to avoid blocking all logins
+    return { allowed: true, remaining: 5, resetAt: null, locked: false }
   }
 }
 
-export function resetLoginAttempts(ip: string): void {
-  loginAttempts.delete(ip)
+export async function resetLoginAttempts(ip: string): Promise<void> {
+  try {
+    const supabase = await createAdminClient()
+    await supabase.rpc('reset_login_rate_limit', { p_ip: ip })
+  } catch (err) {
+    console.error('Failed to reset login attempts:', err)
+  }
 }
 
-export function getLoginAttempts(ip: string): number {
-  const entry = loginAttempts.get(ip)
-  return entry?.attempts || 0
+/** @deprecated No longer used with DB-backed rate limiting. Kept for API compat. */
+export function getLoginAttempts(_ip: string): number {
+  return 0
 }

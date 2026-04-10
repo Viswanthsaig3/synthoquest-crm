@@ -1,4 +1,4 @@
-import { User, Role } from '@/types/user'
+import { User } from '@/types/user'
 import { Task } from '@/types/task'
 import { Leave } from '@/types/leave'
 import { Timesheet } from '@/types/timesheet'
@@ -6,11 +6,8 @@ import { Lead } from '@/types/lead'
 import { Student } from '@/types/student'
 import { Batch } from '@/types/batch'
 import { Payment } from '@/types/payment'
-import { getUserPermissions } from '@/lib/db/queries/permissions'
-import { permissionCache } from './permissions-cache'
-import { logPermissionCheck } from '@/lib/db/queries/audit'
 
-type Permission = 
+type Permission =
   | 'tasks.view_all'
   | 'tasks.create'
   | 'tasks.assign'
@@ -30,12 +27,17 @@ type Permission =
   | 'students.create'
   | 'students.edit'
   | 'students.enroll'
+  | 'students.delete'
   | 'interns.view_all'
   | 'interns.view_assigned'
+  | 'interns.manage_all'
+  | 'interns.manage_assigned'
+  | 'interns.delete'
   | 'batches.view'
   | 'batches.create'
   | 'batches.edit'
   | 'batches.manage'
+  | 'batches.delete'
   | 'payments.view_all'
   | 'payments.view_assigned'
   | 'payments.create'
@@ -45,168 +47,48 @@ type Permission =
   | 'reports.view'
   | 'leaves.apply'
   | 'leaves.approve'
+  | 'leaves.cancel'
+  | 'leaves.view_all'
+  | 'leaves.manage_balances'
+  | 'leaves.edit_all'
+  | 'leaves.delete'
   | 'timesheets.submit'
   | 'timesheets.approve'
+  | 'timesheets.view_all'
+  | 'timesheets.edit_all'
+  | 'timesheets.delete'
+  | 'timesheet_entries.edit_all'
+  | 'timesheet_entries.delete'
   | 'attendance.view_team'
+  | 'attendance.manage_office_location'
+  | 'attendance.manage_home_location_self'
+  | 'attendance.manage_home_location_all'
+  | 'attendance.view_warnings'
+  | 'attendance.adjust_records'
+  | 'attendance.view_adjustments'
+  | 'attendance.delete'
   | 'payroll.view_all'
   | 'payroll.view_own'
   | 'payroll.process'
+  | 'payroll.edit'
+  | 'payroll.delete'
   | 'employees.view_all'
   | 'employees.manage'
+  | 'employees.manage_assigned'
+  | 'compensation.manage'
   | 'roles.manage'
   | 'settings.manage'
 
-const rolePermissions: Record<Role, Permission[]> = {
-  admin: [
-    'tasks.view_all',
-    'tasks.create',
-    'tasks.assign',
-    'tasks.edit',
-    'tasks.delete',
-    'leads.view_all',
-    'leads.create',
-    'leads.edit',
-    'leads.delete',
-    'leads.claim',
-    'leads.call',
-    'leads.convert',
-    'students.view_all',
-    'students.create',
-    'students.edit',
-    'students.enroll',
-    'interns.view_all',
-    'batches.view',
-    'batches.create',
-    'batches.edit',
-    'batches.manage',
-    'payments.view_all',
-    'payments.create',
-    'payments.process',
-    'certificates.view_all',
-    'certificates.issue',
-    'reports.view',
-    'leaves.approve',
-    'timesheets.approve',
-    'attendance.view_team',
-    'payroll.view_all',
-    'payroll.process',
-    'employees.view_all',
-    'employees.manage',
-    'roles.manage',
-    'settings.manage',
-  ],
-  hr: [
-    'tasks.view_all',
-    'tasks.create',
-    'tasks.assign',
-    'tasks.edit',
-    'leads.view_all',
-    'leads.claim',
-    'students.view_all',
-    'students.create',
-    'students.edit',
-    'students.enroll',
-    'interns.view_all',
-    'batches.view',
-    'batches.create',
-    'batches.edit',
-    'payments.view_all',
-    'payments.create',
-    'payments.process',
-    'certificates.view_all',
-    'certificates.issue',
-    'reports.view',
-    'leaves.approve',
-    'timesheets.approve',
-    'attendance.view_team',
-    'payroll.view_all',
-    'payroll.process',
-    'employees.view_all',
-    'employees.manage',
-  ],
-  team_lead: [
-    'tasks.view_all',
-    'tasks.create',
-    'tasks.assign',
-    'tasks.edit',
-    'leads.view_all',
-    'leads.create',
-    'leads.edit',
-    'leads.claim',
-    'leads.call',
-    'leads.convert',
-    'students.view_assigned',
-    'interns.view_all',
-    'payments.view_assigned',
-    'reports.view',
-    'leaves.approve',
-    'timesheets.approve',
-    'attendance.view_team',
-  ],
-  sales_rep: [
-    'leads.view_assigned',
-    'leads.create',
-    'leads.edit',
-    'leads.claim',
-    'leads.call',
-    'leads.convert',
-    'students.view_assigned',
-    'payments.view_assigned',
-    'tasks.complete',
-    'leaves.apply',
-    'timesheets.submit',
-  ],
-  employee: [
-    'tasks.complete',
-    'leaves.apply',
-    'timesheets.submit',
-    'payroll.view_own',
-  ],
-}
-
-async function getUserPermissionsFromDB(userId: string): Promise<string[]> {
-  const cached = permissionCache.get(userId)
-  if (cached) {
-    return cached
-  }
-
-  try {
-    const permissions = await getUserPermissions(userId)
-    permissionCache.set(userId, permissions)
-    return permissions
-  } catch (error) {
-    console.error('Failed to fetch permissions from DB, using fallback:', error)
-    // Fallback to static role-based permissions
-    const user = { id: userId, role: 'employee' } as User
-    return getPermissionsForRole(user.role)
-  }
-}
-
-function getPermissionsForRole(role: Role): string[] {
-  return rolePermissions[role] || []
+function listPermissions(user: User): string[] {
+  return Array.isArray(user.permissions) ? user.permissions : []
 }
 
 export async function hasPermission(user: User, permission: Permission): Promise<boolean> {
-  try {
-    const permissions = await getUserPermissionsFromDB(user.id)
-    const granted = permissions.includes(permission)
-    
-    // Log permission check (async, non-blocking)
-    logPermissionCheck({
-      userId: user.id,
-      permission,
-      granted,
-    }).catch(console.error)
-    
-    return granted
-  } catch (error) {
-    console.error('Permission check failed:', error)
-    return false
-  }
+  return listPermissions(user).includes(permission)
 }
 
 export function hasPermissionStatic(user: User, permission: Permission): boolean {
-  return rolePermissions[user.role]?.includes(permission) ?? false
+  return listPermissions(user).includes(permission)
 }
 
 export function canCreateTask(user: User): boolean {
@@ -233,11 +115,14 @@ export function canViewAllTasks(user: User): boolean {
   return hasPermissionStatic(user, 'tasks.view_all')
 }
 
+/** Org-wide or team task list (API may return tasks for direct reports); workers without these see assignee-only. */
+export function canSeeOrgOrTeamTaskBoard(user: User): boolean {
+  return hasPermissionStatic(user, 'tasks.view_all') || hasPermissionStatic(user, 'tasks.assign')
+}
+
 export function getVisibleTasks(user: User, tasks: Task[]): Task[] {
-  if (canViewAllTasks(user)) {
-    return tasks
-  }
-  return tasks.filter(t => t.assignedTo === user.id)
+  if (canViewAllTasks(user)) return tasks
+  return tasks.filter((task) => task.assignedTo === user.id)
 }
 
 export function canCreateLead(user: User): boolean {
@@ -273,14 +158,12 @@ export function canConvertLead(user: User): boolean {
 }
 
 export function getVisibleLeads(user: User, leads: Lead[]): Lead[] {
-  if (canViewAllLeads(user)) {
-    return leads
-  }
-  return leads.filter(l => l.assignedTo === user.id)
+  if (canViewAllLeads(user)) return leads
+  return leads.filter((lead) => lead.assignedTo === user.id)
 }
 
 export function getUnclaimedLeads(leads: Lead[]): Lead[] {
-  return leads.filter(l => l.assignedTo === null)
+  return leads.filter((lead) => lead.assignedTo === null)
 }
 
 export function canViewAllStudents(user: User): boolean {
@@ -303,24 +186,35 @@ export function canEnrollStudent(user: User): boolean {
   return hasPermissionStatic(user, 'students.enroll')
 }
 
+export function canDeleteStudent(user: User): boolean {
+  return hasPermissionStatic(user, 'students.delete')
+}
+
 export function getVisibleStudents(user: User, students: Student[]): Student[] {
-  if (canViewAllStudents(user)) {
-    return students
-  }
-  return students.filter(s => {
-    if (user.role === 'sales_rep' || user.role === 'team_lead') {
-      return s.convertedBy === user.id
-    }
-    return false
-  })
+  if (canViewAllStudents(user)) return students
+  if (canViewAssignedStudents(user)) return students.filter((student) => student.convertedBy === user.id)
+  return []
 }
 
 export function canViewInterns(user: User): boolean {
-  return hasPermissionStatic(user, 'interns.view_all') || hasPermissionStatic(user, 'interns.view_assigned')
+  return (
+    hasPermissionStatic(user, 'interns.view_all') ||
+    hasPermissionStatic(user, 'interns.view_assigned') ||
+    hasPermissionStatic(user, 'interns.manage_all') ||
+    hasPermissionStatic(user, 'interns.manage_assigned')
+  )
 }
 
-export function canViewAllInterns(user: User): boolean {
-  return hasPermissionStatic(user, 'interns.view_all')
+export function canManageAllInterns(user: User): boolean {
+  return hasPermissionStatic(user, 'interns.manage_all')
+}
+
+export function canManageAssignedInterns(user: User): boolean {
+  return hasPermissionStatic(user, 'interns.manage_assigned')
+}
+
+export function canDeleteIntern(user: User): boolean {
+  return hasPermissionStatic(user, 'interns.delete')
 }
 
 export function canViewBatches(user: User): boolean {
@@ -337,6 +231,10 @@ export function canEditBatch(user: User): boolean {
 
 export function canManageBatch(user: User): boolean {
   return hasPermissionStatic(user, 'batches.manage')
+}
+
+export function canDeleteBatch(user: User): boolean {
+  return hasPermissionStatic(user, 'batches.delete')
 }
 
 export function canViewAllPayments(user: User): boolean {
@@ -356,10 +254,8 @@ export function canProcessPayment(user: User): boolean {
 }
 
 export function getVisiblePayments(user: User, payments: Payment[]): Payment[] {
-  if (canViewAllPayments(user)) {
-    return payments
-  }
-  return payments.filter(p => p.collectedBy === user.id)
+  if (canViewAllPayments(user)) return payments
+  return payments.filter((payment) => payment.collectedBy === user.id)
 }
 
 export function canViewAllCertificates(user: User): boolean {
@@ -382,9 +278,25 @@ export function canApproveLeave(user: User): boolean {
   return hasPermissionStatic(user, 'leaves.approve')
 }
 
+export function canViewAllLeaves(user: User): boolean {
+  return hasPermissionStatic(user, 'leaves.view_all')
+}
+
+export function canManageLeaveBalances(user: User): boolean {
+  return hasPermissionStatic(user, 'leaves.manage_balances')
+}
+
+export function canEditAllLeaves(user: User): boolean {
+  return hasPermissionStatic(user, 'leaves.edit_all')
+}
+
+export function canDeleteLeave(user: User): boolean {
+  return hasPermissionStatic(user, 'leaves.delete')
+}
+
 export function canManageTeamLeaves(user: User, leave: Leave, teamMemberIds: string[]): boolean {
   if (!canApproveLeave(user)) return false
-  if (user.role === 'admin' || user.role === 'hr') return true
+  if (canViewEmployees(user)) return true
   return teamMemberIds.includes(leave.employeeId)
 }
 
@@ -396,14 +308,62 @@ export function canApproveTimesheet(user: User): boolean {
   return hasPermissionStatic(user, 'timesheets.approve')
 }
 
+export function canViewAllTimesheets(user: User): boolean {
+  return hasPermissionStatic(user, 'timesheets.view_all')
+}
+
+export function canEditAllTimesheets(user: User): boolean {
+  return hasPermissionStatic(user, 'timesheets.edit_all')
+}
+
+export function canDeleteTimesheet(user: User): boolean {
+  return hasPermissionStatic(user, 'timesheets.delete')
+}
+
+export function canEditAllTimeEntries(user: User): boolean {
+  return hasPermissionStatic(user, 'timesheet_entries.edit_all')
+}
+
+export function canDeleteTimeEntry(user: User): boolean {
+  return hasPermissionStatic(user, 'timesheet_entries.delete')
+}
+
 export function canManageTeamTimesheets(user: User, timesheet: Timesheet, teamMemberIds: string[]): boolean {
   if (!canApproveTimesheet(user)) return false
-  if (user.role === 'admin' || user.role === 'hr') return true
+  if (canViewEmployees(user)) return true
   return teamMemberIds.includes(timesheet.employeeId)
 }
 
 export function canViewTeamAttendance(user: User): boolean {
   return hasPermissionStatic(user, 'attendance.view_team')
+}
+
+export function canManageOfficeLocation(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.manage_office_location')
+}
+
+export function canManageOwnHomeLocation(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.manage_home_location_self')
+}
+
+export function canManageAllHomeLocations(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.manage_home_location_all')
+}
+
+export function canViewAttendanceWarnings(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.view_warnings')
+}
+
+export function canAdjustAttendanceRecords(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.adjust_records')
+}
+
+export function canViewAttendanceAdjustments(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.view_adjustments')
+}
+
+export function canDeleteAttendance(user: User): boolean {
+  return hasPermissionStatic(user, 'attendance.delete')
 }
 
 export function canViewAllPayroll(user: User): boolean {
@@ -418,20 +378,36 @@ export function canProcessPayroll(user: User): boolean {
   return hasPermissionStatic(user, 'payroll.process')
 }
 
+export function canEditPayroll(user: User): boolean {
+  return hasPermissionStatic(user, 'payroll.edit')
+}
+
+export function canDeletePayroll(user: User): boolean {
+  return hasPermissionStatic(user, 'payroll.delete')
+}
+
 export function canViewEmployees(user: User): boolean {
-  return hasPermissionStatic(user, 'employees.view_all')
+  return hasPermissionStatic(user, 'employees.view_all') || hasPermissionStatic(user, 'employees.manage_assigned')
 }
 
 export function canManageEmployees(user: User): boolean {
   return hasPermissionStatic(user, 'employees.manage')
 }
 
+export function canManageAssignedEmployees(user: User): boolean {
+  return hasPermissionStatic(user, 'employees.manage_assigned')
+}
+
+export function canManageCompensation(user: User): boolean {
+  return hasPermissionStatic(user, 'compensation.manage')
+}
+
 export function canManageSettings(user: User): boolean {
-  return user.role === 'admin' || user.role === 'hr'
+  return hasPermissionStatic(user, 'settings.manage')
 }
 
 export function canManageLeadTypes(user: User): boolean {
-  return user.role === 'admin'
+  return hasPermissionStatic(user, 'settings.manage')
 }
 
 export function canManageRoles(user: User): boolean {
@@ -439,21 +415,27 @@ export function canManageRoles(user: User): boolean {
 }
 
 export function getTeamMemberIds(managerId: string, users: User[]): string[] {
-  return users
-    .filter(u => u.managedBy === managerId)
-    .map(u => u.id)
+  return users.filter((user) => user.managedBy === managerId).map((user) => user.id)
 }
 
 export function getManagedUsers(manager: User, users: User[]): User[] {
-  if (manager.role === 'admin' || manager.role === 'hr') {
-    return users.filter(u => u.role === 'employee' || u.role === 'sales_rep')
+  if (canManageEmployees(manager)) {
+    return users.filter((user) => user.id !== manager.id)
   }
-  if (manager.role === 'team_lead') {
-    return users.filter(u => u.managedBy === manager.id)
+  if (canAssignTask(manager)) {
+    return users.filter((user) => user.managedBy === manager.id)
   }
   return []
 }
 
 export function isSalesRole(user: User): boolean {
-  return user.role === 'sales_rep' || user.role === 'team_lead' || user.role === 'admin'
+  const permissions = listPermissions(user)
+  return (
+    permissions.includes('leads.view_assigned') ||
+    permissions.includes('leads.claim') ||
+    permissions.includes('leads.call') ||
+    permissions.includes('leads.convert')
+  )
 }
+
+export type { Permission }

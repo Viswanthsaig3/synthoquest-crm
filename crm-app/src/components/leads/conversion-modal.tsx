@@ -1,16 +1,25 @@
 'use client'
 
-import React, { useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import React, { useEffect, useState } from 'react'
+import Link from 'next/link'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Lead } from '@/types/lead'
-import { mockBatches } from '@/lib/mock-data'
-import { COURSES, COURSE_FEES, PAYMENT_METHODS, PAYMENT_PLANS } from '@/lib/constants'
-import { formatCurrency } from '@/lib/utils'
+import { useToast } from '@/components/ui/toast'
+import type { Lead } from '@/lib/db/queries/leads'
+import { COURSES, COURSE_FEES, PAYMENT_METHODS } from '@/lib/constants'
+import { formatCurrency, getErrorMessage } from '@/lib/utils'
+import { getBatchesForCourse, type BatchListItem } from '@/lib/api/batches'
+import { updateLead } from '@/lib/api/leads'
 import { CheckCircle, GraduationCap, IndianRupee, Loader2 } from 'lucide-react'
 
 interface ConversionModalProps {
@@ -21,8 +30,17 @@ interface ConversionModalProps {
   onComplete: (studentId: string) => void
 }
 
-export function ConversionModal({ lead, converterId, converterName, onClose, onComplete }: ConversionModalProps) {
+export function ConversionModal({
+  lead,
+  converterId: _converterId,
+  converterName,
+  onClose,
+  onComplete,
+}: ConversionModalProps) {
+  const { toast } = useToast()
   const [loading, setLoading] = useState(false)
+  const [batchLoading, setBatchLoading] = useState(true)
+  const [batches, setBatches] = useState<BatchListItem[]>([])
   const [step, setStep] = useState(1)
   const [formData, setFormData] = useState({
     batchId: '',
@@ -33,33 +51,87 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
     notes: '',
   })
 
-  const course = COURSES.find(c => c === lead.courseInterested)
-  const baseFee = lead.courseInterested ? (COURSE_FEES[lead.courseInterested] || 0) : 0
-  const availableBatches = mockBatches.filter(b => 
-    b.courseName === lead.courseInterested && 
-    b.status !== 'completed' && 
-    b.availableSeats > 0
-  )
+  const courseName = lead.courseInterested || ''
+  const baseFee = courseName ? COURSE_FEES[courseName] || 0 : 0
 
-  const selectedBatch = mockBatches.find(b => b.id === formData.batchId)
-  const discount = parseInt(formData.discount) || 0
-  const totalFee = baseFee - discount
-  const initialPayment = formData.paymentPlan === 'full' 
-    ? totalFee 
-    : parseInt(formData.initialPayment) || Math.round(totalFee / 2)
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      if (!courseName || !COURSES.includes(courseName)) {
+        setBatches([])
+        setBatchLoading(false)
+        return
+      }
+      try {
+        setBatchLoading(true)
+        const res = await getBatchesForCourse(courseName)
+        if (!cancelled) setBatches(res.data || [])
+      } catch (e: unknown) {
+        if (!cancelled) {
+          console.error(e)
+          toast({
+            title: 'Could not load batches',
+            description: getErrorMessage(e, 'Try again or create a batch for this course.'),
+            variant: 'destructive',
+          })
+          setBatches([])
+        }
+      } finally {
+        if (!cancelled) setBatchLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [courseName, toast])
+
+  const availableBatches = batches.filter((b) => b.availableSeats > 0)
+  const selectedBatch = batches.find((b) => b.id === formData.batchId)
+  const discount = parseInt(formData.discount, 10) || 0
+  const totalFee = Math.max(0, baseFee - discount)
+  const initialPayment =
+    formData.paymentPlan === 'full'
+      ? totalFee
+      : parseInt(formData.initialPayment, 10) || Math.round(totalFee / 2)
 
   const handleSubmit = async () => {
     setLoading(true)
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    
-    const studentId = `stu_${Date.now()}`
-    setLoading(false)
-    onComplete(studentId)
+    try {
+      const summary = [
+        `Converted by ${converterName}`,
+        selectedBatch ? `Batch: ${selectedBatch.name}` : '',
+        `Total: ${formatCurrency(totalFee)}`,
+        `Initial payment: ${formatCurrency(initialPayment)}`,
+        formData.notes ? `Notes: ${formData.notes}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+
+      await updateLead(lead.id, {
+        status: 'converted',
+        notes: [lead.notes, summary].filter(Boolean).join('\n\n---\n\n'),
+      })
+
+      toast({
+        title: 'Lead converted',
+        description: 'The lead is marked as converted.',
+      })
+      onComplete(lead.id)
+    } catch (e: unknown) {
+      toast({
+        title: 'Conversion failed',
+        description: getErrorMessage(e, 'Could not update lead.'),
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" showCloseButton>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CheckCircle className="h-5 w-5 text-green-600" />
@@ -83,7 +155,9 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
                 <GraduationCap className="h-5 w-5 text-primary" />
                 <div>
                   <p className="font-medium">{lead.name}</p>
-                  <p className="text-sm text-muted-foreground">{lead.email} • {lead.phone}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {lead.email} • {lead.phone}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -94,35 +168,48 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
 
             <div className="space-y-2">
               <Label>Select Batch *</Label>
-              {availableBatches.length === 0 ? (
-                <div className="p-4 border rounded-lg text-center text-muted-foreground">
-                  No available batches for this course. Create a batch first.
+              {batchLoading ? (
+                <div className="flex items-center gap-2 p-4 border rounded-lg text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading batches…
+                </div>
+              ) : availableBatches.length === 0 ? (
+                <div className="p-4 border rounded-lg text-center text-muted-foreground space-y-2">
+                  <p>No open batches with seats for this course.</p>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/batches">Go to Batches</Link>
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {availableBatches.map(batch => (
-                    <div
+                  {availableBatches.map((batch) => (
+                    <button
                       key={batch.id}
+                      type="button"
                       onClick={() => setFormData({ ...formData, batchId: batch.id })}
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                        formData.batchId === batch.id ? 'border-primary bg-primary/5' : 'hover:border-gray-400'
+                      className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                        formData.batchId === batch.id
+                          ? 'border-primary bg-primary/5'
+                          : 'hover:border-muted-foreground/40'
                       }`}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="font-medium">{batch.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            {batch.mode} • {batch.instructorName}
+                            {batch.mode} • {batch.instructorName || 'TBD'}
                           </p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right shrink-0">
                           <p className="text-sm">{batch.availableSeats} seats left</p>
                           <p className="text-xs text-muted-foreground">
-                            Starts {new Date(batch.startDate).toLocaleDateString()}
+                            {batch.startDate
+                              ? `Starts ${new Date(batch.startDate).toLocaleDateString()}`
+                              : 'Start TBD'}
                           </p>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -145,24 +232,30 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
             <div className="space-y-2">
               <Label>Payment Plan</Label>
               <div className="grid grid-cols-2 gap-2">
-                <div
+                <button
+                  type="button"
                   onClick={() => setFormData({ ...formData, paymentPlan: 'full' })}
-                  className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                    formData.paymentPlan === 'full' ? 'border-primary bg-primary/5' : 'hover:border-gray-400'
+                  className={`p-3 border rounded-lg text-left transition-colors ${
+                    formData.paymentPlan === 'full'
+                      ? 'border-primary bg-primary/5'
+                      : 'hover:border-muted-foreground/40'
                   }`}
                 >
                   <p className="font-medium">Full Payment</p>
                   <p className="text-sm text-muted-foreground">{formatCurrency(totalFee)}</p>
-                </div>
-                <div
+                </button>
+                <button
+                  type="button"
                   onClick={() => setFormData({ ...formData, paymentPlan: 'installment' })}
-                  className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                    formData.paymentPlan === 'installment' ? 'border-primary bg-primary/5' : 'hover:border-gray-400'
+                  className={`p-3 border rounded-lg text-left transition-colors ${
+                    formData.paymentPlan === 'installment'
+                      ? 'border-primary bg-primary/5'
+                      : 'hover:border-muted-foreground/40'
                   }`}
                 >
                   <p className="font-medium">Installment</p>
                   <p className="text-sm text-muted-foreground">Pay in parts</p>
-                </div>
+                </button>
               </div>
             </div>
 
@@ -186,7 +279,9 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
                 {PAYMENT_METHODS.map((m) => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -235,7 +330,7 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Batch</span>
-                  <span>{selectedBatch?.name}</span>
+                  <span>{selectedBatch?.name ?? '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Fee</span>
@@ -271,9 +366,9 @@ export function ConversionModal({ lead, converterId, converterName, onClose, onC
             </Button>
           )}
           {step < 3 ? (
-            <Button 
+            <Button
               onClick={() => setStep(step + 1)}
-              disabled={step === 1 && !formData.batchId}
+              disabled={step === 1 && (!formData.batchId || batchLoading)}
             >
               Continue
             </Button>

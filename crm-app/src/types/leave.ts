@@ -1,5 +1,5 @@
 export type LeaveType = 'sick' | 'casual' | 'paid'
-export type LeaveStatus = 'pending' | 'approved' | 'rejected'
+export type LeaveStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
 
 export interface LeaveBalance {
   sick: number

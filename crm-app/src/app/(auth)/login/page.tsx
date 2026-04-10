@@ -95,11 +95,6 @@ export default function LoginPage() {
               <p className="text-sm text-muted-foreground text-center mb-3">
                 Use your registered email and password
               </p>
-              <div className="text-xs text-muted-foreground space-y-1">
-                <p>Default admin account:</p>
-                <p className="font-mono">Email: admin@synthoquest.com</p>
-                <p className="font-mono">Password: Admin@123</p>
-              </div>
             </div>
           </CardContent>
         </Card>

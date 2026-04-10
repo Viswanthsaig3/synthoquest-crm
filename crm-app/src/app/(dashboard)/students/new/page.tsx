@@ -42,7 +42,7 @@ export default function NewStudentPage() {
         <Breadcrumb />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">You don't have permission to create students.</p>
+            <p className="text-muted-foreground">{"You don't have permission to create students."}</p>
           </CardContent>
         </Card>
       </div>

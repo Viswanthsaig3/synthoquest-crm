@@ -13,14 +13,24 @@ import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/toast'
-import { getActiveLeadTypes, getInitialStatus, STUDENT_TYPE_ID } from '@/lib/mock-data/lead-types'
-import { mockUsers } from '@/lib/mock-data/users'
+import { getLeadTypes, createLead } from '@/lib/api/leads'
+import { getEmployees } from '@/lib/api/employees'
 import { LEAD_PRIORITIES } from '@/lib/constants'
-import { generateId } from '@/lib/utils'
 import { canCreateLead } from '@/lib/permissions'
-import { CustomFieldsData, LeadType, LeadTypeField } from '@/types/lead-type'
+import type { LeadType, LeadTypeField } from '@/types/lead-type'
+import type { LeadPriority, LeadSource } from '@/types/lead'
+import type { User } from '@/types/user'
+import type { CustomFieldsData } from '@/types/lead-type'
 import { ArrowLeft, Save, Loader2, GraduationCap, Briefcase, FileText, Users, Building, Handshake, UserPlus, Star } from 'lucide-react'
 import Link from 'next/link'
+
+const LEAD_SOURCES: readonly LeadSource[] = ['ads', 'referral', 'organic']
+
+function parseLeadSource(value: unknown): LeadSource {
+  return typeof value === 'string' && (LEAD_SOURCES as readonly string[]).includes(value)
+    ? (value as LeadSource)
+    : 'organic'
+}
 
 const iconMap: Record<string, React.ElementType> = {
   GraduationCap,
@@ -36,10 +46,13 @@ const iconMap: Record<string, React.ElementType> = {
 export default function NewLeadPage() {
   const router = useRouter()
   const { toast } = useToast()
+  const { user } = useAuth()
   const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [leadTypes, setLeadTypes] = useState<LeadType[]>([])
+  const [employees, setEmployees] = useState<User[]>([])
   
-  const leadTypes = getActiveLeadTypes()
-  const [selectedTypeId, setSelectedTypeId] = useState(STUDENT_TYPE_ID)
+  const [selectedTypeId, setSelectedTypeId] = useState<string>('')
   const selectedLeadType = useMemo(() => 
     leadTypes.find(lt => lt.id === selectedTypeId), 
     [leadTypes, selectedTypeId]
@@ -58,6 +71,36 @@ export default function NewLeadPage() {
   const [customFields, setCustomFields] = useState<CustomFieldsData>({})
 
   useEffect(() => {
+    async function fetchData() {
+      try {
+        setInitialLoading(true)
+        const [typesRes, employeesRes] = await Promise.all([
+          getLeadTypes(),
+          getEmployees(),
+        ])
+        setLeadTypes(typesRes.data)
+        setEmployees(employeesRes.data)
+        
+        // Set default lead type
+        const studentType = typesRes.data.find(lt => lt.code === 'student')
+        if (studentType) {
+          setSelectedTypeId(studentType.id)
+        }
+      } catch (error) {
+        console.error('Failed to fetch data:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load data. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setInitialLoading(false)
+      }
+    }
+    fetchData()
+  }, [toast])
+
+  useEffect(() => {
     if (selectedLeadType) {
       const initialCustomFields: CustomFieldsData = {}
       selectedLeadType.fields.forEach(field => {
@@ -65,9 +108,9 @@ export default function NewLeadPage() {
       })
       setCustomFields(initialCustomFields)
     }
-  }, [selectedTypeId])
+  }, [selectedTypeId, selectedLeadType])
 
-  const employees = mockUsers.filter(u => u.status === 'active')
+  const activeEmployees = useMemo(() => employees.filter(u => u.status === 'active'), [employees])
 
   const handleCustomFieldChange = (fieldId: string, value: string | number | boolean | string[] | null) => {
     setCustomFields(prev => ({ ...prev, [fieldId]: value }))
@@ -87,14 +130,37 @@ export default function NewLeadPage() {
 
     setLoading(true)
     
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    toast({
-      title: 'Lead created',
-      description: `"${formData.name}" has been added successfully.`,
-    })
-    
-    router.push('/leads')
+    try {
+      await createLead({
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        alternatePhone: formData.alternatePhone || undefined,
+        typeId: selectedTypeId || undefined,
+        customFields: customFields,
+        courseInterested: (customFields['sf_course'] as string) || undefined,
+        source: parseLeadSource(customFields['_source']),
+        priority: formData.priority as LeadPriority,
+        notes: formData.notes || undefined,
+        assignedTo: formData.assignedTo || undefined,
+      })
+      
+      toast({
+        title: 'Lead created',
+        description: `"${formData.name}" has been added successfully.`,
+      })
+      
+      router.push('/leads')
+    } catch (error) {
+      console.error('Failed to create lead:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to create lead. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const getIconComponent = (iconName: string) => {
@@ -180,6 +246,19 @@ export default function NewLeadPage() {
     }
   }
 
+  if (initialLoading) {
+    return (
+      <div className="space-y-6 max-w-4xl">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <PermissionGuard check={canCreateLead} fallbackMessage="You don't have permission to create leads.">
       <div className="space-y-6 max-w-4xl">
@@ -203,11 +282,11 @@ export default function NewLeadPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Lead Type</CardTitle>
-                <CardDescription>Select the type of lead you're adding</CardDescription>
+                <CardDescription>{"Select the type of lead you're adding"}</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {leadTypes.map((lt) => {
+                  {leadTypes.filter(lt => lt.isActive).map((lt) => {
                     const IconComponent = getIconComponent(lt.icon)
                     const isSelected = selectedTypeId === lt.id
                     return (
@@ -355,7 +434,7 @@ export default function NewLeadPage() {
                     onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
                   >
                     <option value="">Leave unassigned</option>
-                    {employees.map(emp => (
+                    {activeEmployees.map(emp => (
                       <option key={emp.id} value={emp.id}>{emp.name} - {emp.department}</option>
                     ))}
                   </Select>

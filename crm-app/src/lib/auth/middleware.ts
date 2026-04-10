@@ -6,6 +6,7 @@ export interface AuthenticatedUser {
   userId: string
   email: string
   role: string
+  updatedAt: string // SECURITY: CRIT-05 — used for permission cache staleness detection
 }
 
 export type AuthHandler = (user: AuthenticatedUser, request: NextRequest) => Promise<NextResponse>
@@ -34,7 +35,7 @@ export async function withAuth(request: NextRequest, handler: AuthHandler): Prom
   
   const { data: user, error } = await supabase
     .from('users')
-    .select('id, email, role, status')
+    .select('id, email, role, status, updated_at')
     .eq('id', payload.userId)
     .is('deleted_at', null)
     .single()
@@ -57,6 +58,7 @@ export async function withAuth(request: NextRequest, handler: AuthHandler): Prom
     userId: user.id,
     email: user.email,
     role: user.role,
+    updatedAt: user.updated_at,
   }
 
   try {
@@ -81,7 +83,7 @@ export async function getUserFromToken(token: string): Promise<AuthenticatedUser
   
   const { data: user, error } = await supabase
     .from('users')
-    .select('id, email, role, status')
+    .select('id, email, role, status, updated_at')
     .eq('id', payload.userId)
     .is('deleted_at', null)
     .single()
@@ -94,5 +96,6 @@ export async function getUserFromToken(token: string): Promise<AuthenticatedUser
     userId: user.id,
     email: user.email,
     role: user.role,
+    updatedAt: user.updated_at,
   }
 }

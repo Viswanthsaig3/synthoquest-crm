@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { mockStudents, mockLeads, mockPayments, mockBatches } from '@/lib/mock-data'
+
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { canViewReports } from '@/lib/permissions'
 import {
@@ -43,6 +43,9 @@ import {
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
+type PieChartDatum = { name: string; value: number }
+type CourseEnrollmentDatum = { name: string; enrollments: number }
+
 export default function ReportsPage() {
   const { user } = useAuth()
   const [selectedPeriod, setSelectedPeriod] = useState('month')
@@ -53,72 +56,41 @@ export default function ReportsPage() {
         <Breadcrumb />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">You don't have permission to view reports.</p>
+            <p className="text-muted-foreground">{"You don't have permission to view reports."}</p>
           </CardContent>
         </Card>
       </div>
     )
   }
 
-  const activeStudents = mockStudents.filter(s => s.status === 'active').length
-  const totalStudents = mockStudents.length
-  const totalLeads = mockLeads.length
-  const convertedLeads = mockLeads.filter(l => l.status === 'converted').length
-  const conversionRate = totalLeads > 0 ? Math.round((convertedLeads / totalLeads) * 100) : 0
-  const totalRevenue = mockPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0)
-  const totalDue = mockStudents.reduce((sum, s) => sum + s.totalDue, 0)
+  const activeStudents = 0
+  const totalStudents = 0
+  const totalLeads = 0
+  const convertedLeads = 0
+  const conversionRate = 0
+  const totalRevenue = 0
+  const totalDue = 0
 
-  const leadsBySource = mockLeads.reduce((acc, lead) => {
-    const source = lead.source
-    acc[source] = (acc[source] || 0) + 1
-    return acc
-  }, {} as Record<string, number>)
+  const leadsBySource: Record<string, number> = {}
 
-  const sourceData = Object.entries(leadsBySource).map(([name, value]) => ({
-    name: name.charAt(0).toUpperCase() + name.slice(1),
-    value,
-  }))
+  const sourceData: PieChartDatum[] = []
 
-  const leadsByStatus = mockLeads.reduce((acc, lead) => {
-    const status = lead.status
-    acc[status] = (acc[status] || 0) + 1
-    return acc
-  }, {} as Record<string, number>)
+  const leadsByStatus: Record<string, number> = {}
 
-  const statusData = Object.entries(leadsByStatus).map(([name, value]) => ({
-    name: name.charAt(0).toUpperCase() + name.slice(1).replace('_', ' '),
-    value,
-  }))
+  const statusData: PieChartDatum[] = []
 
-  const courseEnrollments = mockStudents.reduce((acc, student) => {
-    student.enrollments.forEach(e => {
-      acc[e.courseName] = (acc[e.courseName] || 0) + 1
-    })
-    return acc
-  }, {} as Record<string, number>)
+  const courseEnrollments: Record<string, number> = {}
 
-  const courseData = Object.entries(courseEnrollments)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-    .map(([name, enrollments]) => ({ name: name.length > 15 ? name.substring(0, 15) + '...' : name, enrollments }))
+  const courseData: CourseEnrollmentDatum[] = []
 
   const monthlyRevenue = [
-    { month: 'Aug', revenue: 180000, collected: 165000 },
-    { month: 'Sep', revenue: 220000, collected: 200000 },
-    { month: 'Oct', revenue: 280000, collected: 260000 },
-    { month: 'Nov', revenue: 310000, collected: 295000 },
-    { month: 'Dec', revenue: 250000, collected: 240000 },
-    { month: 'Jan', revenue: totalRevenue, collected: totalRevenue * 0.9 },
+    { month: 'Aug', revenue: 0, collected: 0 },
+    { month: 'Sep', revenue: 0, collected: 0 },
+    { month: 'Oct', revenue: 0, collected: 0 },
+    { month: 'Nov', revenue: 0, collected: 0 },
+    { month: 'Dec', revenue: 0, collected: 0 },
+    { month: 'Jan', revenue: 0, collected: 0 },
   ]
-
-  const batchOccupancy = mockBatches
-    .filter(b => b.status !== 'completed')
-    .map(b => ({
-      name: b.name,
-      enrolled: b.enrolledCount,
-      capacity: b.maxCapacity,
-      occupancy: Math.round((b.enrolledCount / b.maxCapacity) * 100),
-    }))
 
   return (
     <div className="space-y-6">
@@ -127,7 +99,7 @@ export default function ReportsPage() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Reports & Analytics</h1>
-          <p className="text-muted-foreground">Overview of your institute's performance</p>
+          <p className="text-muted-foreground">{"Overview of your institute's performance"}</p>
         </div>
         <div className="flex gap-2">
           <select
@@ -209,7 +181,7 @@ export default function ReportsPage() {
                 <p className="text-2xl font-bold text-red-600">{formatCurrency(totalDue)}</p>
                 <div className="flex items-center gap-1 text-sm text-orange-600 mt-1">
                   <ArrowDownRight className="h-4 w-4" />
-                  <span>{mockStudents.filter(s => s.totalDue > 0).length} students</span>
+                  <span>0 students</span>
                 </div>
               </div>
               <div className="p-3 bg-orange-100 rounded-full">
@@ -323,20 +295,7 @@ export default function ReportsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {batchOccupancy.map((batch) => (
-              <div key={batch.name} className="flex items-center gap-4">
-                <div className="w-28 font-medium text-sm">{batch.name}</div>
-                <div className="flex-1">
-                  <Progress 
-                    value={batch.occupancy} 
-                    className={`h-3 ${batch.occupancy >= 90 ? '[&>div]:bg-red-500' : batch.occupancy >= 70 ? '[&>div]:bg-orange-500' : ''}`}
-                  />
-                </div>
-                <div className="w-24 text-sm text-right">
-                  {batch.enrolled}/{batch.capacity} ({batch.occupancy}%)
-                </div>
-              </div>
-            ))}
+            <p className="text-muted-foreground text-center py-4">No batch occupancy data</p>
           </div>
         </CardContent>
       </Card>

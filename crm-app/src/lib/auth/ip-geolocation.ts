@@ -7,35 +7,77 @@ export interface IPLocation {
   longitude: number | null
 }
 
-export async function getIPLocation(ipAddress: string): Promise<IPLocation | null> {
+function unknownLocation(ip: string): IPLocation {
+  return {
+    ip,
+    city: 'Unknown',
+    region: 'Unknown',
+    country: 'Unknown',
+    latitude: null,
+    longitude: null,
+  }
+}
+
+/** True when geolocation APIs are not meaningful (local dev, private networks). */
+function isNonPublicIP(ip: string): boolean {
+  const trimmed = ip.trim()
+  if (
+    trimmed === '127.0.0.1' ||
+    trimmed === '::1' ||
+    trimmed === 'localhost' ||
+    trimmed.startsWith('192.168.') ||
+    trimmed.startsWith('10.') ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(trimmed)
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Best-effort IP geolocation for login logs. Never throws; returns Unknown on failure.
+ * Skips external calls for localhost/private IPs to avoid noisy errors in dev.
+ */
+export async function getIPLocation(ipAddress: string): Promise<IPLocation> {
+  if (isNonPublicIP(ipAddress)) {
+    return unknownLocation(ipAddress)
+  }
+
   try {
-    const response = await fetch(`https://ipapi.co/${ipAddress}/json/`)
-    
+    const controller = new AbortController()
+    const t = setTimeout(() => controller.abort(), 5000)
+    const response = await fetch(
+      `https://ipapi.co/${encodeURIComponent(ipAddress)}/json/`,
+      { signal: controller.signal, cache: 'no-store' }
+    )
+    clearTimeout(t)
+
     if (!response.ok) {
-      throw new Error('Failed to fetch IP location')
+      return unknownLocation(ipAddress)
     }
 
-    const data = await response.json()
+    const data = (await response.json()) as Record<string, unknown>
+    if (data && data.error) {
+      return unknownLocation(ipAddress)
+    }
 
+    const lat = data.latitude
+    const lng = data.longitude
     return {
       ip: ipAddress,
-      city: data.city || 'Unknown',
-      region: data.region || 'Unknown',
-      country: data.country_name || 'Unknown',
-      latitude: parseFloat(data.latitude) || 0,
-      longitude: parseFloat(data.longitude) || 0,
+      city: typeof data.city === 'string' ? data.city : 'Unknown',
+      region: typeof data.region === 'string' ? data.region : 'Unknown',
+      country:
+        typeof data.country_name === 'string'
+          ? data.country_name
+          : typeof data.country === 'string'
+            ? data.country
+            : 'Unknown',
+      latitude: typeof lat === 'number' ? lat : lat != null ? parseFloat(String(lat)) || null : null,
+      longitude: typeof lng === 'number' ? lng : lng != null ? parseFloat(String(lng)) || null : null,
     }
-  } catch (error) {
-    console.error('Error fetching IP location:', error)
-    
-    return {
-      ip: ipAddress,
-      city: 'Unknown',
-      region: 'Unknown',
-      country: 'Unknown',
-      latitude: 0,
-      longitude: 0,
-    }
+  } catch {
+    return unknownLocation(ipAddress)
   }
 }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
@@ -10,59 +10,102 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { useToast } from '@/components/ui/toast'
-import { mockUsers } from '@/lib/mock-data'
-import { TASK_PRIORITIES, COURSES } from '@/lib/constants'
-import { getInitials } from '@/lib/utils'
-import { canAssignTask, getManagedUsers } from '@/lib/permissions'
-import { ArrowLeft, Save, Loader2, Users, User } from 'lucide-react'
+import { createTask } from '@/lib/api/tasks'
+import { getAssignableUsers, type AssignableUser } from '@/lib/api/employees'
+import { TASK_PRIORITIES, TASK_TYPES } from '@/lib/constants'
+import { canCreateTask } from '@/lib/permissions'
+import { hasPermission } from '@/lib/client-permissions'
+import { ArrowLeft, Save, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import type { TaskPriority, TaskType } from '@/lib/db/queries/tasks'
+import { getErrorMessage } from '@/lib/utils'
 
 export default function NewTaskPage() {
   const router = useRouter()
   const { user } = useAuth()
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([])
   const [formData, setFormData] = useState({
     title: '',
     description: '',
+    type: 'task',
     priority: 'medium',
     assignedTo: '',
-    deadline: '',
-    relatedLead: '',
+    dueDate: '',
+    estimatedHours: '',
+    notes: '',
   })
 
-  const canAssign = user && canAssignTask(user)
-  const managedUsers = user ? getManagedUsers(user, mockUsers) : []
-  
-  const assignableEmployees = useMemo(() => {
-    if (!user) return []
-    if (user.role === 'admin' || user.role === 'hr') {
-      return mockUsers.filter(u => u.status === 'active' && u.id !== user.id)
+  useEffect(() => {
+    if (!user) return
+
+    if (!canCreateTask(user)) {
+      router.replace('/tasks')
+      return
     }
-    if (user.role === 'team_lead') {
-      return managedUsers.filter(u => u.status === 'active')
+
+    if (hasPermission(user, 'tasks.assign')) {
+      fetchAssignableUsers()
     }
-    return []
-  }, [user, managedUsers])
+  }, [router, user])
+
+  const fetchAssignableUsers = async () => {
+    try {
+      const response = await getAssignableUsers()
+      setAssignableUsers(response.data || [])
+    } catch (error) {
+      console.error('Error fetching assignable users:', error)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (!formData.title.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Title is required',
+        variant: 'destructive',
+      })
+      return
+    }
+
     setLoading(true)
 
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    try {
+      await createTask({
+        title: formData.title,
+        description: formData.description,
+        type: formData.type as TaskType,
+        priority: formData.priority as TaskPriority,
+        assignedTo: formData.assignedTo || undefined,
+        dueDate: formData.dueDate || undefined,
+        estimatedHours: formData.estimatedHours ? parseFloat(formData.estimatedHours) : undefined,
+        notes: formData.notes || undefined,
+      })
 
-    toast({
-      title: 'Task created',
-      description: `"${formData.title}" has been created successfully.`,
-    })
+      toast({
+        title: 'Task created',
+        description: `"${formData.title}" has been created successfully.`,
+      })
 
-    router.push('/tasks')
+      router.push('/tasks')
+    } catch (error: unknown) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to create task'),
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (!user) return null
+
+  const canAssign = hasPermission(user, 'tasks.assign')
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -84,9 +127,9 @@ export default function NewTaskPage() {
         <form onSubmit={handleSubmit}>
           <CardHeader>
             <CardTitle>Task Details</CardTitle>
-            <CardDescription>Provide information about the task</CardDescription>
+            <CardDescription>Provide the task information</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="title">Title *</Label>
               <Input
@@ -105,107 +148,93 @@ export default function NewTaskPage() {
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Enter task description"
-                rows={4}
+                rows={3}
               />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="priority">Priority</Label>
+                <Label htmlFor="type">Type</Label>
                 <Select
-                  value={formData.priority}
-                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                  id="type"
+                  value={formData.type}
+                  onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                 >
-                  {TASK_PRIORITIES.map((p) => (
-                    <option key={p.value} value={p.value}>{p.label}</option>
+                  {TASK_TYPES.map(type => (
+                    <option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>
                   ))}
                 </Select>
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="deadline">Deadline *</Label>
+                <Label htmlFor="priority">Priority</Label>
+                <Select
+                  id="priority"
+                  value={formData.priority}
+                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                >
+                  {TASK_PRIORITIES.map(priority => (
+                    <option key={priority.value} value={priority.value}>{priority.label}</option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
+            {canAssign && (
+              <div className="space-y-2">
+                <Label htmlFor="assignedTo">Assign To</Label>
+                <Select
+                  id="assignedTo"
+                  value={formData.assignedTo}
+                  onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
+                >
+                  <option value="">Select user (hierarchy only)</option>
+                  {assignableUsers.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role} - {u.department})
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Only users in your hierarchy and department are shown
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="dueDate">Due Date</Label>
                 <Input
-                  id="deadline"
+                  id="dueDate"
                   type="date"
-                  value={formData.deadline}
-                  onChange={(e) => setFormData({ ...formData, deadline: e.target.value })}
-                  required
+                  value={formData.dueDate}
+                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="estimatedHours">Estimated Hours</Label>
+                <Input
+                  id="estimatedHours"
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={formData.estimatedHours}
+                  onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
+                  placeholder="0"
                 />
               </div>
             </div>
-          </CardContent>
 
-          {canAssign && assignableEmployees.length > 0 && (
-            <CardContent className="space-y-4 border-t">
-              <div>
-                <Label className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  Assign To Team Member
-                </Label>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Select a team member to assign this task to
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {assignableEmployees.map((emp) => (
-                  <div
-                    key={emp.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                      formData.assignedTo === emp.id
-                        ? 'border-primary bg-primary/5'
-                        : 'hover:border-primary/50'
-                    }`}
-                    onClick={() => setFormData({ ...formData, assignedTo: emp.id })}
-                  >
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={emp.avatar || undefined} />
-                      <AvatarFallback>{getInitials(emp.name)}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-medium">{emp.name}</p>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs capitalize">{emp.department}</Badge>
-                        <Badge className="text-xs capitalize">{emp.role.replace('_', ' ')}</Badge>
-                      </div>
-                    </div>
-                    {formData.assignedTo === emp.id && (
-                      <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center">
-                        <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {formData.assignedTo && (
-                <div className="flex items-center gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setFormData({ ...formData, assignedTo: '' })}
-                  >
-                    Clear Selection
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          )}
-
-          <CardContent className="space-y-4 border-t">
             <div className="space-y-2">
-              <Label htmlFor="relatedLead">Related Course (Optional)</Label>
-              <Select
-                value={formData.relatedLead}
-                onChange={(e) => setFormData({ ...formData, relatedLead: e.target.value })}
-              >
-                <option value="">Select course</option>
-                {COURSES.map((course) => (
-                  <option key={course} value={course}>{course}</option>
-                ))}
-              </Select>
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Additional notes"
+                rows={2}
+              />
             </div>
           </CardContent>
 

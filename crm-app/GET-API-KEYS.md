@@ -1,12 +1,5 @@
 # 🔑 How to Get Supabase API Keys
 
-## You Provided:
-```
-Access Token: sbp_6adf1863441b7381edf496de14a151411526d3ed
-```
-
-This is a **CLI Access Token** - it's used for Supabase CLI operations, NOT for the application.
-
 ## What We Need:
 
 We need the **API Keys** (JWT tokens) from your Supabase dashboard.
@@ -47,10 +40,15 @@ NEXT_PUBLIC_SUPABASE_URL=https://ybeasksflypsboiiszjp.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<PASTE_THE_ANON_KEY_HERE>
 SUPABASE_SERVICE_ROLE_KEY=<PASTE_THE_SERVICE_ROLE_KEY_HERE>
 
-# JWT Secrets
-JWT_SECRET=your-random-secret-min-32-characters
-JWT_REFRESH_SECRET=your-random-secret-min-32-characters
+# JWT Secrets (Generate with: openssl rand -base64 32)
+JWT_SECRET=<GENERATE_A_RANDOM_SECRET>
+JWT_REFRESH_SECRET=<GENERATE_A_RANDOM_SECRET>
 ```
+
+⚠️ **SECURITY WARNING:**
+- Never commit `.env.local` to git
+- Never share your `service_role` key or JWT secrets publicly
+- Regenerate any exposed tokens immediately in Supabase dashboard
 
 ### 6. Restart Server
 

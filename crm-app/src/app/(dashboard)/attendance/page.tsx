@@ -1,480 +1,306 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
-import { useAuth } from '@/context/auth-context'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { StatsCard } from '@/components/shared'
+import { AttendanceSubNav } from '@/components/attendance/attendance-subnav'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Select } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
-import { mockAttendance, getAttendanceByEmployee, getAttendanceSummary, getTeamAttendanceSummary, getTodayTeamAttendance } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
-import { formatTime, formatDate, getInitials } from '@/lib/utils'
-import { canViewTeamAttendance, getManagedUsers } from '@/lib/permissions'
-import { Calendar, Clock, CheckCircle, XCircle, TrendingUp, LogIn, LogOut, Users, Search, UserCheck, UserX, AlertCircle } from 'lucide-react'
-import Link from 'next/link'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { useToast } from '@/components/ui/toast'
+import { formatDate, formatTime } from '@/lib/utils'
+import { AlertCircle, Clock, Loader2, LogIn, LogOut, Activity } from 'lucide-react'
+import type { AttendanceRecord, TodayAttendanceSummary } from '@/types/time-entry'
+import { fetchWithAccessTokenRefresh } from '@/lib/api/auth-fetch'
+import { getCurrentPositionForAttendance } from '@/lib/client-geolocation'
+import { useAttendanceHeartbeat } from '@/hooks/use-attendance-heartbeat'
 
 export default function AttendancePage() {
-  const { user } = useAuth()
+  const { toast } = useToast()
+  const [loading, setLoading] = useState(true)
+  const [summary, setSummary] = useState<TodayAttendanceSummary | null>(null)
+  const [tick, setTick] = useState(0)
+  const [showAutoCheckoutAlert, setShowAutoCheckoutAlert] = useState(false)
 
-  if (!user) return null
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true)
+      const attRes = await fetchWithAccessTokenRefresh('/api/attendance/today')
+      const attData = await attRes.json()
+      setSummary(attData.data || null)
+    } catch (error) {
+      console.error('Error fetching attendance:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const showTeamView = canViewTeamAttendance(user)
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
-  if (showTeamView) {
-    return <TeamAttendanceView user={user} />
+  const openSession = summary?.openSession ?? null
+  const isCheckedIn = Boolean(openSession)
+
+  const handleAutoCheckout = useCallback(() => {
+    setShowAutoCheckoutAlert(true)
+    toast({
+      title: 'Session ended',
+      description: 'You were automatically checked out due to inactivity.',
+      variant: 'destructive',
+    })
+    fetchData()
+  }, [fetchData, toast])
+
+  const handleHeartbeatError = useCallback((error: Error) => {
+    console.error('[Heartbeat] Error in hook:', error)
+  }, [])
+
+  useAttendanceHeartbeat({
+    isCheckedIn,
+    onAutoCheckout: handleAutoCheckout,
+    onError: handleHeartbeatError,
+  })
+
+  useEffect(() => {
+    if (!openSession?.checkInTime) return
+    const interval = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(interval)
+  }, [openSession?.id])
+
+  const handleAttendanceAction = async (method: 'POST' | 'PUT') => {
+    try {
+      const loc = await getCurrentPositionForAttendance()
+      if (!loc.ok) {
+        toast({
+          title: 'Location required',
+          description: loc.message,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      const res = await fetchWithAccessTokenRefresh('/api/attendance/today', {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+
+      const session = data.data as AttendanceRecord
+
+      toast({
+        title: method === 'POST' ? 'Checked in' : 'Checked out',
+        description:
+          method === 'POST'
+            ? session?.isLate
+              ? `You are ${session.lateByMinutes} minutes late (first arrival today)`
+              : 'On time!'
+            : `This session: ${session?.totalHours?.toFixed(1) ?? '?'} hours`,
+      })
+
+      if (method === 'POST' && session?.checkInInRadius === false) {
+        toast({
+          title: 'Outside allowed radius',
+          description: 'Your attendance was recorded and an out-of-radius warning was raised.',
+          variant: 'destructive',
+        })
+      }
+      if (method === 'PUT' && session?.checkOutInRadius === false) {
+        toast({
+          title: 'Outside allowed radius',
+          description: 'Your attendance was recorded and an out-of-radius warning was raised.',
+          variant: 'destructive',
+        })
+      }
+
+      fetchData()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Attendance action failed'
+      toast({
+        title: 'Error',
+        description: message,
+        variant: 'destructive',
+      })
+    }
   }
 
-  return <EmployeeAttendanceView user={user} />
-}
+  const formatElapsed = (ms: number) => {
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
+    const s = Math.floor((ms % 60000) / 1000)
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
 
-function TeamAttendanceView({ user }: { user: typeof mockUsers[0] }) {
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [departmentFilter, setDepartmentFilter] = useState('')
+  const runningMs = useMemo(() => {
+    if (!openSession?.checkInTime) return 0
+    return Date.now() - new Date(openSession.checkInTime).getTime()
+  }, [openSession?.checkInTime, openSession?.id, tick])
+  const completedH = summary?.completedHoursToday ?? 0
+  const totalDayHours = completedH + runningMs / 3600000
 
-  const managedUsers = getManagedUsers(user, mockUsers)
-  const allEmployeeIds = user.role === 'admin' || user.role === 'hr' 
-    ? mockUsers.filter(u => u.role === 'employee' || u.role === 'sales_rep').map(u => u.id)
-    : managedUsers.map(u => u.id)
+  const completedSessions = (summary?.sessions ?? []).filter((s) => s.checkOutTime)
+  const firstLate = (summary?.sessions ?? []).find((s) => s.isLate)
 
-  const teamSummary = getTeamAttendanceSummary(allEmployeeIds)
-  const todayAttendance = getTodayTeamAttendance(allEmployeeIds)
-
-  const filteredEmployees = useMemo(() => {
-    const employees = user.role === 'admin' || user.role === 'hr'
-      ? mockUsers.filter(u => u.role === 'employee' || u.role === 'sales_rep')
-      : managedUsers
-
-    return employees.filter(emp => {
-      const matchesSearch = emp.name.toLowerCase().includes(search.toLowerCase()) ||
-        emp.email.toLowerCase().includes(search.toLowerCase())
-      
-      const empToday = todayAttendance.find(a => a.employeeId === emp.id)
-      const matchesStatus = !statusFilter || 
-        (statusFilter === 'present' && empToday?.status === 'present') ||
-        (statusFilter === 'late' && empToday?.status === 'late') ||
-        (statusFilter === 'absent' && empToday?.status === 'absent') ||
-        (statusFilter === 'not_checked_in' && !empToday)
-      
-      const matchesDepartment = !departmentFilter || emp.department === departmentFilter
-      
-      return matchesSearch && matchesStatus && matchesDepartment
-    })
-  }, [search, statusFilter, departmentFilter, managedUsers, todayAttendance, user.role])
-
-  const statusOptions = [
-    { value: '', label: 'All Status' },
-    { value: 'present', label: 'Present' },
-    { value: 'late', label: 'Late' },
-    { value: 'absent', label: 'Absent' },
-    { value: 'not_checked_in', label: 'Not Checked In' }
-  ]
-
-  const departmentOptions = [
-    { value: '', label: 'All Departments' },
-    { value: 'sales', label: 'Sales' },
-    { value: 'training', label: 'Training' },
-    { value: 'marketing', label: 'Marketing' }
-  ]
-
-  const getStatusBadge = (status?: string) => {
-    switch (status) {
-      case 'present':
-        return <Badge className="bg-green-100 text-green-800">Present</Badge>
-      case 'late':
-        return <Badge className="bg-yellow-100 text-yellow-800">Late</Badge>
-      case 'absent':
-        return <Badge className="bg-red-100 text-red-800">Absent</Badge>
-      case 'half_day':
-        return <Badge className="bg-purple-100 text-purple-800">Half Day</Badge>
-      default:
-        return <Badge variant="outline" className="text-gray-500">Not Checked In</Badge>
-    }
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6">
       <Breadcrumb />
-      
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Team Attendance</h1>
-          <p className="text-muted-foreground">Monitor team attendance and check-in status</p>
-        </div>
-        <Link href="/attendance/history">
-          <Button variant="outline">
-            <Calendar className="h-4 w-4 mr-2" />
-            View History
-          </Button>
-        </Link>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatsCard
-          title="Total Employees"
-          value={teamSummary.totalEmployees}
-          icon={Users}
-        />
-        <StatsCard
-          title="Present"
-          value={teamSummary.present}
-          icon={UserCheck}
-          description="On time today"
-        />
-        <StatsCard
-          title="Late"
-          value={teamSummary.late}
-          icon={AlertCircle}
-          description="Late arrivals"
-        />
-        <StatsCard
-          title="Absent"
-          value={teamSummary.absent}
-          icon={UserX}
-          description="Not present"
-        />
-        <StatsCard
-          title="Not Checked In"
-          value={teamSummary.notCheckedIn}
-          icon={Clock}
-          description="Pending check-in"
-        />
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Attendance</h1>
+          <p className="text-muted-foreground">{formatDate(new Date())}</p>
+        </div>
+        <AttendanceSubNav />
       </div>
 
       <Card>
         <CardHeader>
-          <div className="flex flex-col md:flex-row md:items-center gap-4">
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Today's Attendance - {formatDate(new Date())}
-            </CardTitle>
-            <div className="flex flex-wrap gap-2 md:ml-auto">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search employees..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-10 w-64"
-                />
-              </div>
-              <Select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-40"
-              >
-                {statusOptions.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </Select>
-              <Select
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
-                className="w-40"
-              >
-                {departmentOptions.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </Select>
-            </div>
-          </div>
+          <CardTitle>Today</CardTitle>
+          <CardDescription>
+            Multiple sessions per day: check out to end a block, then check in again when you resume.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Department</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Check In</TableHead>
-                <TableHead>Check Out</TableHead>
-                <TableHead>Hours</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredEmployees.map((employee) => {
-                const empToday = todayAttendance.find(a => a.employeeId === employee.id)
-                return (
-                  <TableRow key={employee.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-10 w-10">
-                          <AvatarImage src={employee.avatar || undefined} />
-                          <AvatarFallback>{getInitials(employee.name)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">{employee.name}</p>
-                          <p className="text-xs text-muted-foreground">{employee.email}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="capitalize">
-                        {employee.department}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {getStatusBadge(empToday?.status)}
-                    </TableCell>
-                    <TableCell>
-                      {empToday?.checkIn ? formatTime(empToday.checkIn) : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {empToday?.checkOut ? formatTime(empToday.checkOut) : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {empToday?.hoursWorked ? `${empToday.hoursWorked}h` : '-'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Link href={`/employees/${employee.id}?tab=attendance`}>
-                        <Button variant="ghost" size="sm">
-                          View History
-                        </Button>
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+        <CardContent className="space-y-6">
+          <div className="text-center py-6 bg-muted/50 rounded-lg space-y-2">
+            <p className="text-5xl font-mono font-bold">
+              {openSession ? formatElapsed(runningMs) : '00:00:00'}
+            </p>
+            <p className="text-sm text-muted-foreground">Current session (HH : MM : SS)</p>
+            <p className="text-lg font-semibold text-primary">
+              Total today: {totalDayHours.toFixed(2)}h
+            </p>
+          </div>
+
+          {completedSessions.length > 0 && (
+            <div className="space-y-2 text-sm border rounded-lg p-3">
+              <p className="font-medium text-muted-foreground">Completed sessions</p>
+              <ul className="space-y-2">
+                {completedSessions.map((s, i) => (
+                  <li key={s.id} className="flex justify-between gap-2 border-b border-border/50 pb-2 last:border-0 last:pb-0">
+                    <span>
+                      #{i + 1}{' '}
+                      {s.checkInTime && formatTime(new Date(s.checkInTime))} –{' '}
+                      {s.checkOutTime && formatTime(new Date(s.checkOutTime))}
+                    </span>
+                    <span className="font-medium tabular-nums">{s.totalHours?.toFixed(2) ?? '—'}h</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {openSession && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">This session started</span>
+                <span className="font-medium">
+                  {openSession.checkInTime
+                    ? formatTime(new Date(openSession.checkInTime))
+                    : '—'}
+                </span>
+              </div>
+              {openSession.lastActivity && (
+                <div className="flex items-center gap-2 text-green-600">
+                  <Activity className="h-4 w-4 shrink-0" />
+                  <span>Last activity: {formatTime(new Date(openSession.lastActivity))}</span>
+                </div>
+              )}
+              {openSession.autoCheckout && (
+                <div className="flex items-center gap-2 text-orange-600">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>
+                    Auto-checkout ({openSession.autoCheckoutReason || 'system'})
+                  </span>
+                </div>
+              )}
+              {openSession.checkInInRadius === false && (
+                <div className="flex items-center gap-2 text-red-600">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>
+                    Check-in outside radius ({openSession.checkInDistanceMeters ?? '-'}m from{' '}
+                    {openSession.checkInNearestType || 'reference'})
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {showAutoCheckoutAlert && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-sm">
+              <div className="flex items-center gap-2 text-orange-700 font-medium mb-2">
+                <AlertCircle className="h-4 w-4" />
+                <span>Auto-checkout detected</span>
+              </div>
+              <p className="text-orange-600">
+                Your session was automatically ended due to inactivity. If this was incorrect,
+                please contact your manager or HR to request an adjustment.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => setShowAutoCheckoutAlert(false)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
+
+          {!openSession && firstLate && (
+            <div className="flex items-center gap-2 text-yellow-600 text-sm">
+              <AlertCircle className="h-4 w-4" />
+              <span>Late on first arrival today by {firstLate.lateByMinutes} minutes</span>
+            </div>
+          )}
+
+          {completedSessions.some(
+            (s) => s.checkOutInRadius === false || s.checkInInRadius === false
+          ) && (
+            <div className="flex items-center gap-2 text-red-600 text-sm">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>One or more sessions have a geofence warning (see History).</span>
+            </div>
+          )}
+
+          {!openSession ? (
+            <Button onClick={() => handleAttendanceAction('POST')} className="w-full h-14 text-lg">
+              <LogIn className="h-5 w-5 mr-2" />
+              Check In
+            </Button>
+          ) : (
+            <Button onClick={() => handleAttendanceAction('PUT')} variant="destructive" className="w-full h-14 text-lg">
+              <LogOut className="h-5 w-5 mr-2" />
+              Check Out
+            </Button>
+          )}
+
+          {!openSession && completedSessions.length > 0 && (
+            <p className="text-center text-sm text-muted-foreground">
+              <Clock className="inline h-4 w-4 mr-1 align-text-bottom" />
+              Start another work block with Check In when you return.
+            </p>
+          )}
         </CardContent>
       </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Attendance Overview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">Present Today</span>
-                  <span className="text-sm font-medium">
-                    {teamSummary.present + teamSummary.late} / {teamSummary.totalEmployees}
-                  </span>
-                </div>
-                <Progress 
-                  value={(teamSummary.present + teamSummary.late) / teamSummary.totalEmployees * 100} 
-                  className="h-2" 
-                />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">On Time Rate</span>
-                  <span className="text-sm font-medium">
-                    {teamSummary.present > 0 
-                      ? Math.round(teamSummary.present / (teamSummary.present + teamSummary.late) * 100) 
-                      : 0}%
-                  </span>
-                </div>
-                <Progress 
-                  value={teamSummary.present > 0 
-                    ? teamSummary.present / (teamSummary.present + teamSummary.late) * 100 
-                    : 0} 
-                  className="h-2 [&>div]:bg-green-500" 
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Link href="/attendance/history" className="block">
-              <Button variant="outline" className="w-full justify-start">
-                <Calendar className="h-4 w-4 mr-2" />
-                View Attendance History
-              </Button>
-            </Link>
-            <Link href="/reports?tab=attendance" className="block">
-              <Button variant="outline" className="w-full justify-start">
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Attendance Reports
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  )
-}
-
-function EmployeeAttendanceView({ user }: { user: typeof mockUsers[0] }) {
-  const [isCheckedIn, setIsCheckedIn] = useState(false)
-  const [currentTime, setCurrentTime] = useState(new Date())
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date())
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
-
-  const todayAttendance = mockAttendance.find(a => 
-    a.employeeId === user.id && 
-    a.date.toDateString() === new Date().toDateString()
-  )
-
-  const summary = getAttendanceSummary(user.id)
-
-  const handleCheckIn = () => {
-    setIsCheckedIn(true)
-  }
-
-  const handleCheckOut = () => {
-    setIsCheckedIn(false)
-  }
-
-  return (
-    <div className="space-y-6">
-      <Breadcrumb />
-      
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">My Attendance</h1>
-          <p className="text-muted-foreground">Track your daily check-in and check-out</p>
-        </div>
-        <Link href="/attendance/history">
-          <Button variant="outline">
-            <Calendar className="h-4 w-4 mr-2" />
-            View History
-          </Button>
-        </Link>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatsCard
-          title="Present Days"
-          value={summary.present}
-          icon={CheckCircle}
-        />
-        <StatsCard
-          title="Absent Days"
-          value={summary.absent}
-          icon={XCircle}
-        />
-        <StatsCard
-          title="Late Arrivals"
-          value={summary.late}
-          icon={Clock}
-        />
-        <StatsCard
-          title="Avg Hours/Day"
-          value={`${summary.averageHours.toFixed(1)}h`}
-          icon={TrendingUp}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Check In/Out</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="text-center">
-              <p className="text-4xl font-mono font-bold">
-                {currentTime.toLocaleTimeString()}
-              </p>
-              <p className="text-muted-foreground mt-1">
-                {currentTime.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-              </p>
-            </div>
-
-            {isCheckedIn ? (
-              <Button onClick={handleCheckOut} variant="destructive" className="w-full h-16 text-lg">
-                <LogOut className="h-6 w-6 mr-2" />
-                Check Out
-              </Button>
-            ) : (
-              <Button onClick={handleCheckIn} className="w-full h-16 text-lg">
-                <LogIn className="h-6 w-6 mr-2" />
-                Check In
-              </Button>
-            )}
-
-            {todayAttendance && (
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Check In:</span>
-                  <span className="font-medium">
-                    {todayAttendance.checkIn ? formatTime(todayAttendance.checkIn) : '-'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Check Out:</span>
-                  <span className="font-medium">
-                    {todayAttendance.checkOut ? formatTime(todayAttendance.checkOut) : '-'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Hours Worked:</span>
-                  <Badge>{todayAttendance.hoursWorked}h</Badge>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Weekly Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">This Week</span>
-                  <span className="text-sm font-medium">42h / 40h</span>
-                </div>
-                <Progress value={105} className="h-2" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 pt-4">
-                <div className="p-4 rounded-lg bg-green-50 border border-green-200">
-                  <p className="text-sm text-green-600">On Time</p>
-                  <p className="text-2xl font-bold text-green-700">4 days</p>
-                </div>
-                <div className="p-4 rounded-lg bg-yellow-50 border border-yellow-200">
-                  <p className="text-sm text-yellow-600">Late</p>
-                  <p className="text-2xl font-bold text-yellow-700">1 day</p>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t">
-                <h4 className="font-medium mb-3">Recent Days</h4>
-                <div className="space-y-2">
-                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day, i) => (
-                    <div key={day} className="flex items-center justify-between p-2 rounded bg-muted/50">
-                      <span>{day}</span>
-                      <Badge variant={i === 1 ? 'destructive' : 'default'}>
-                        {i === 1 ? '9:15 AM (Late)' : '9:00 AM'}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
     </div>
   )
 }

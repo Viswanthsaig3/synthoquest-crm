@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -55,10 +56,10 @@ export function PageHeader({
           {action && (
             <Button onClick={action.onClick} asChild={!!action.href}>
               {action.href ? (
-                <a href={action.href}>
+                <Link href={action.href}>
                   <Plus className="h-4 w-4 mr-2" />
                   {action.label}
-                </a>
+                </Link>
               ) : (
                 <>
                   <Plus className="h-4 w-4 mr-2" />

@@ -1,9 +1,9 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { PageHeader, StatusBadge, EmptyState } from '@/components/shared'
+import { PageHeader, StatusBadge, EmptyState, PermissionGuard } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -17,36 +17,92 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getPendingLeaves } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
+
 import { formatDate, getInitials } from '@/lib/utils'
-import { getTeamMemberIds, canManageTeamLeaves } from '@/lib/permissions'
-import { FileText, CheckCircle, XCircle, X } from 'lucide-react'
+import { hasPermission } from '@/lib/client-permissions'
+import { FileText, CheckCircle, XCircle, X, Loader2 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
+import { LeavesSubNav } from '@/components/leaves/leaves-subnav'
+import type { Leave } from '@/types/leave'
 
 export default function LeaveApprovalsPage() {
-  const { user } = useAuth()
+  const { user, token } = useAuth()
   const { toast } = useToast()
+  const [loading, setLoading] = useState(true)
+  const [pendingLeaves, setPendingLeaves] = useState<Leave[]>([])
   const [rejectModal, setRejectModal] = useState<{ open: boolean; leaveId: string | null }>({
     open: false,
     leaveId: null,
   })
   const [rejectionReason, setRejectionReason] = useState('')
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  const allPendingLeaves = getPendingLeaves()
-  const teamMemberIds = user ? getTeamMemberIds(user.id, mockUsers) : []
-  
-  const pendingLeaves = allPendingLeaves.filter(leave => 
-    canManageTeamLeaves(user!, leave, teamMemberIds)
-  )
+  useEffect(() => {
+    if (!user || !token) return
+    
+    async function fetchPendingLeaves() {
+      try {
+        const res = await fetch('/api/leaves?status=pending', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        
+        if (res.ok) {
+          const data = await res.json()
+          setPendingLeaves(data.data || [])
+        }
+      } catch (error) {
+        console.error('Error fetching pending leaves:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load pending leaves',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchPendingLeaves()
+  }, [user, token, toast])
 
   if (!user) return null
 
-  const handleApprove = (id: string) => {
-    toast({
-      title: 'Leave approved',
-      description: 'The leave request has been approved.',
-    })
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  const handleApprove = async (id: string) => {
+    setActionLoading(id)
+    try {
+      const res = await fetch(`/api/leaves/${id}/approve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Failed to approve leave')
+      }
+
+      toast({
+        title: 'Leave approved',
+        description: 'The leave request has been approved.',
+      })
+
+      setPendingLeaves(prev => prev.filter(l => l.id !== id))
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to approve leave',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   const openRejectModal = (leaveId: string) => {
@@ -54,7 +110,7 @@ export default function LeaveApprovalsPage() {
     setRejectionReason('')
   }
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (!rejectionReason.trim()) {
       toast({
         title: 'Reason required',
@@ -63,20 +119,51 @@ export default function LeaveApprovalsPage() {
       })
       return
     }
-    
-    toast({
-      title: 'Leave rejected',
-      description: 'The leave request has been rejected.',
-      variant: 'destructive',
-    })
-    setRejectModal({ open: false, leaveId: null })
-    setRejectionReason('')
+
+    if (!rejectModal.leaveId) return
+
+    setActionLoading(rejectModal.leaveId)
+    try {
+      const res = await fetch(`/api/leaves/${rejectModal.leaveId}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ reason: rejectionReason })
+      })
+
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Failed to reject leave')
+      }
+
+      toast({
+        title: 'Leave rejected',
+        description: 'The leave request has been rejected.',
+        variant: 'destructive',
+      })
+      
+      setPendingLeaves(prev => prev.filter(l => l.id !== rejectModal.leaveId))
+      setRejectModal({ open: false, leaveId: null })
+      setRejectionReason('')
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to reject leave',
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   return (
+    <PermissionGuard check={(u) => hasPermission(u, 'leaves.approve')} fallbackMessage="You don't have permission to approve leaves.">
     <div className="space-y-6">
       <Breadcrumb />
-      
+      <LeavesSubNav />
+
       <PageHeader
         title="Leave Approvals"
         description={`${pendingLeaves.length} pending leave requests`}
@@ -103,45 +190,52 @@ export default function LeaveApprovalsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pendingLeaves.map((leave) => {
-                  const employee = mockUsers.find(u => u.id === leave.employeeId)
-                  return (
-                    <TableRow key={leave.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar>
-                            <AvatarImage src={employee?.avatar || undefined} />
-                            <AvatarFallback>{employee ? getInitials(employee.name) : '?'}</AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">{leave.employeeName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="capitalize">{leave.type}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          <div>{formatDate(leave.startDate)}</div>
-                          <div className="text-muted-foreground">to {formatDate(leave.endDate)}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell>{leave.days}</TableCell>
-                      <TableCell className="max-w-xs truncate">{leave.reason}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => handleApprove(leave.id)}>
-                            <CheckCircle className="h-4 w-4 mr-1 text-green-600" />
-                            Approve
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => openRejectModal(leave.id)}>
-                            <XCircle className="h-4 w-4 mr-1 text-red-600" />
-                            Reject
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                {pendingLeaves.map((leave) => (
+                  <TableRow key={leave.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback>{getInitials(leave.employeeName)}</AvatarFallback>
+                        </Avatar>
+                        <span className="font-medium">{leave.employeeName}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="capitalize">{leave.type}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      {formatDate(leave.startDate)} - {formatDate(leave.endDate)}
+                    </TableCell>
+                    <TableCell>{leave.days}</TableCell>
+                    <TableCell className="max-w-xs truncate">{leave.reason}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => handleApprove(leave.id)}
+                          disabled={actionLoading === leave.id}
+                        >
+                          {actionLoading === leave.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                          )}
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => openRejectModal(leave.id)}
+                          disabled={actionLoading === leave.id}
+                        >
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}
@@ -183,5 +277,6 @@ export default function LeaveApprovalsPage() {
         </div>
       )}
     </div>
+    </PermissionGuard>
   )
 }

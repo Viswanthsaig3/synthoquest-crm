@@ -1,21 +1,14 @@
-import { Role } from './user'
-
-export type EmployeeStatus = 'active' | 'inactive' | 'suspended'
-
-export interface User {
-  id: string
-  name: string
-  email: string
-  phone: string
-  role: Role
-  department: string
-  status: EmployeeStatus
-  joinDate: string
-  avatar: string | null
-  salary?: number
-  managedBy?: string | null
-  lastLoginAt?: string | null
-}
+/**
+ * Auth-related types. `User` and `AuthState` live in `./user` (single source of truth).
+ */
+export type {
+  User,
+  AuthState,
+  Role,
+  EmployeeStatus,
+  CompensationType,
+  Department,
+} from './user'
 
 export interface LoginLog {
   id: string
@@ -40,13 +33,5 @@ export interface RefreshToken {
   createdAt: string
   revokedAt: string | null
   revokedBy: string | null
-}
-
-export interface AuthState {
-  user: User | null
-  isAuthenticated: boolean
-  isLoading: boolean
-  login: (email: string, password: string) => Promise<boolean>
-  logout: () => Promise<void>
-  refreshSession: () => Promise<void>
+  familyId: string | null // SECURITY: HIGH-04 — token family for reuse detection
 }

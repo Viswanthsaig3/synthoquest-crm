@@ -8,8 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { mockBatches, mockUsers } from '@/lib/mock-data'
+
 import { BATCH_STATUSES, BATCH_MODES, COURSES } from '@/lib/constants'
+import type { Batch, BatchSchedule } from '@/types/batch'
 import { formatDate, cn } from '@/lib/utils'
 import { canCreateBatch, canViewBatches } from '@/lib/permissions'
 import { BookOpen, Users, Calendar, Clock, MapPin, Video, Plus, Eye } from 'lucide-react'
@@ -21,16 +22,7 @@ export default function BatchesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [courseFilter, setCourseFilter] = useState('')
 
-  const filteredBatches = useMemo(() => {
-    return mockBatches.filter(batch => {
-      const matchesSearch = batch.name.toLowerCase().includes(search.toLowerCase()) ||
-        batch.courseName.toLowerCase().includes(search.toLowerCase()) ||
-        batch.instructorName.toLowerCase().includes(search.toLowerCase())
-      const matchesStatus = !statusFilter || batch.status === statusFilter
-      const matchesCourse = !courseFilter || batch.courseName === courseFilter
-      return matchesSearch && matchesStatus && matchesCourse
-    })
-  }, [search, statusFilter, courseFilter])
+  const filteredBatches: Batch[] = []
 
   if (!user || !canViewBatches(user)) return null
 
@@ -118,7 +110,7 @@ export default function BatchesPage() {
                     <div className="flex items-center gap-2 text-sm">
                       <Clock className="h-4 w-4 text-muted-foreground" />
                       <span>
-                        {batch.schedule.slice(0, 2).map(s => s.day.charAt(0).toUpperCase() + s.day.slice(1, 3)).join(', ')}
+                        {batch.schedule.slice(0, 2).map((s: BatchSchedule) => s.day.charAt(0).toUpperCase() + s.day.slice(1, 3)).join(', ')}
                         {' '}• {batch.schedule[0]?.startTime} - {batch.schedule[0]?.endTime}
                       </span>
                     </div>

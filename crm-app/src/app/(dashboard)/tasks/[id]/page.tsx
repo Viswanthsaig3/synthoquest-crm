@@ -1,36 +1,31 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Select } from '@/components/ui/select'
-import { StatusBadge, PriorityBadge, FileUpload } from '@/components/shared'
-import { mockTasks, getTaskById } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
-import { TASK_STATUSES } from '@/lib/constants'
-import { formatDate, getInitials, formatFileSize } from '@/lib/utils'
-import { canCompleteTask, canEditTask, canDeleteTask, canAssignTask } from '@/lib/permissions'
+import { StatusBadge, PriorityBadge } from '@/components/shared'
+import { getTaskById, getTaskComments, createTaskComment, getTaskHistory, startTask, completeTask, cancelTask } from '@/lib/api/tasks'
+import { formatDate, getErrorMessage } from '@/lib/utils'
+import type { Task, TaskComment, TaskHistory } from '@/lib/db/queries/tasks'
+import { hasPermission } from '@/lib/client-permissions'
 import { useToast } from '@/components/ui/toast'
 import { 
   ArrowLeft, 
-  Edit, 
-  Trash2, 
   Calendar,
   User,
   MessageSquare,
   Clock,
   Send,
   CheckCircle,
-  Paperclip,
-  Download,
-  X
+  XCircle,
+  Play,
+  Loader2,
+  Edit
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -40,13 +35,53 @@ export default function TaskDetailPage() {
   const { user } = useAuth()
   const { toast } = useToast()
   const taskId = params.id as string
-  const task = getTaskById(taskId)
+  
+  const [task, setTask] = useState<Task | null>(null)
+  const [comments, setComments] = useState<TaskComment[]>([])
+  const [history, setHistory] = useState<TaskHistory[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
   const [newComment, setNewComment] = useState('')
-  const [showCompleteModal, setShowCompleteModal] = useState(false)
-  const [completionRemarks, setCompletionRemarks] = useState('')
-  const [completionFiles, setCompletionFiles] = useState<File[]>([])
 
-  if (!user || !task) {
+  useEffect(() => {
+    if (taskId) {
+      fetchTask()
+    }
+  }, [taskId])
+
+  const fetchTask = async () => {
+    try {
+      const [taskRes, commentsRes, historyRes] = await Promise.all([
+        getTaskById(taskId),
+        getTaskComments(taskId),
+        getTaskHistory(taskId)
+      ])
+      
+      setTask(taskRes.data)
+      setComments(commentsRes.data || [])
+      setHistory(historyRes.data || [])
+    } catch (error: unknown) {
+      console.error('Error fetching task:', error)
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to load task'),
+        variant: 'destructive',
+      })
+      router.push('/tasks')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!user || loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (!task) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
@@ -62,43 +97,94 @@ export default function TaskDetailPage() {
     )
   }
 
-  const assignedUser = mockUsers.find(u => u.id === task.assignedTo)
-  const createdBy = mockUsers.find(u => u.id === task.createdBy)
+  const canComplete = task.assignedTo === user.id || hasPermission(user, 'tasks.edit')
+  const canEdit = hasPermission(user, 'tasks.edit')
+  const canCancel = hasPermission(user, 'tasks.edit') || hasPermission(user, 'tasks.assign')
 
-  const canComplete = canCompleteTask(user, task)
-  const canEdit = canEditTask(user)
-  const canDelete = canDeleteTask(user)
+  const handleAddComment = async () => {
+    if (!newComment.trim()) return
 
-  const handleAddComment = () => {
-    if (newComment.trim()) {
+    setActionLoading(true)
+    try {
+      await createTaskComment(taskId, { comment: newComment })
       toast({
         title: 'Comment added',
         description: 'Your comment has been added to the task.',
       })
       setNewComment('')
-    }
-  }
-
-  const handleCompleteTask = () => {
-    if (!completionRemarks.trim()) {
+      fetchTask()
+    } catch (error: unknown) {
       toast({
-        title: 'Remarks required',
-        description: 'Please provide completion remarks.',
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to add comment'),
         variant: 'destructive',
       })
-      return
+    } finally {
+      setActionLoading(false)
     }
-    
-    toast({
-      title: 'Task completed',
-      description: 'The task has been marked as completed.',
-    })
-    setShowCompleteModal(false)
-    setCompletionRemarks('')
-    setCompletionFiles([])
   }
 
-  const getUserById = (id: string) => mockUsers.find(u => u.id === id)
+  const handleStart = async () => {
+    setActionLoading(true)
+    try {
+      await startTask(taskId)
+      toast({
+        title: 'Task started',
+        description: 'The task is now in progress.',
+      })
+      fetchTask()
+    } catch (error: unknown) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to start task'),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleComplete = async () => {
+    setActionLoading(true)
+    try {
+      await completeTask(taskId)
+      toast({
+        title: 'Task completed',
+        description: 'The task has been marked as completed.',
+      })
+      fetchTask()
+    } catch (error: unknown) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to complete task'),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!confirm('Are you sure you want to cancel this task?')) return
+
+    setActionLoading(true)
+    try {
+      await cancelTask(taskId)
+      toast({
+        title: 'Task cancelled',
+        description: 'The task has been cancelled.',
+      })
+      fetchTask()
+    } catch (error: unknown) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to cancel task'),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -112,285 +198,166 @@ export default function TaskDetailPage() {
             </Button>
           </Link>
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{task.title}</h1>
-              <StatusBadge status={task.status} />
-              <PriorityBadge priority={task.priority} />
-            </div>
-            <p className="text-muted-foreground flex items-center gap-4 mt-1">
-              <span className="flex items-center gap-1">
-                <Calendar className="h-4 w-4" />
-                Due: {formatDate(task.deadline)}
-              </span>
+            <h1 className="text-2xl font-bold">{task.title}</h1>
+            <p className="text-muted-foreground">
+              {task.type} • {task.priority} priority
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {canComplete && task.status !== 'done' && (
-            <Button onClick={() => setShowCompleteModal(true)}>
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Mark Complete
-            </Button>
-          )}
+          <StatusBadge status={task.status} />
           {canEdit && (
-            <Link href={`/tasks/${task.id}?edit=true`}>
-              <Button variant="outline">
-                <Edit className="h-4 w-4 mr-2" />
+            <Link href={`/tasks/${taskId}/edit`}>
+              <Button variant="outline" size="sm">
+                <Edit className="h-4 w-4 mr-1" />
                 Edit
               </Button>
             </Link>
           )}
-          {canDelete && (
-            <Button variant="destructive">
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete
-            </Button>
-          )}
         </div>
       </div>
 
-      {task.completion && (
-        <Card className="border-green-200 bg-green-50">
-          <CardContent className="py-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium text-green-800">Task Completed</p>
-                <p className="text-sm text-green-700 mt-1">{task.completion.remarks}</p>
-                <p className="text-xs text-green-600 mt-2">
-                  Completed on {formatDate(task.completion.completedAt)} by {getUserById(task.completion.completedBy)?.name}
-                </p>
-                {task.completion.attachments.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {task.completion.attachments.map(att => (
-                      <div key={att.id} className="flex items-center gap-2 px-3 py-1 bg-white rounded border text-sm">
-                        <Paperclip className="h-3 w-3" />
-                        <span>{att.fileName}</span>
-                        <span className="text-muted-foreground">({formatFileSize(att.fileSize)})</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <p className="text-sm text-muted-foreground">Assigned To</p>
+                <p className="font-medium">{task.assignedToName || 'Unassigned'}</p>
               </div>
+              <User className="h-8 w-8 text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Due Date</p>
+                <p className="font-medium">
+                  {task.dueDate ? formatDate(new Date(task.dueDate)) : 'No due date'}
+                </p>
+              </div>
+              <Calendar className="h-8 w-8 text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Time Logged</p>
+                <p className="font-medium">{task.actualHours || 0}h / {task.estimatedHours || 0}h</p>
+              </div>
+              <Clock className="h-8 w-8 text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Description</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-muted-foreground">{task.description || 'No description provided'}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Comments ({comments.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {comments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No comments yet</p>
+          ) : (
+            <div className="space-y-3">
+              {comments.map((comment) => (
+                <div key={comment.id} className="p-3 bg-muted rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">{comment.userName || 'Unknown'}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(new Date(comment.createdAt))}
+                    </span>
+                  </div>
+                  <p className="text-sm">{comment.comment}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="pt-4 border-t">
+            <Textarea
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="Add a comment..."
+              rows={3}
+            />
+            <Button 
+              onClick={handleAddComment} 
+              disabled={!newComment.trim() || actionLoading}
+              className="mt-2"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Add Comment
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {history.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {history.map((item) => (
+                <div key={item.id} className="flex items-start gap-3 text-sm">
+                  <div className="w-2 h-2 rounded-full bg-primary mt-2" />
+                  <div>
+                    <span className="font-medium">{item.userName || 'System'}</span>
+                    <span className="text-muted-foreground"> {item.action.replace('_', ' ')}</span>
+                    <span className="text-muted-foreground text-xs ml-2">
+                      {formatDate(new Date(item.createdAt))}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Description</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">{task.description || 'No description provided'}</p>
-            </CardContent>
-          </Card>
-
-          {task.attachments.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Paperclip className="h-5 w-5" />
-                  Attachments ({task.attachments.length})
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {task.attachments.map(attachment => {
-                    const uploader = getUserById(attachment.uploadedBy)
-                    return (
-                      <div key={attachment.id} className="flex items-center justify-between p-3 rounded-lg bg-muted">
-                        <div className="flex items-center gap-3">
-                          <Paperclip className="h-4 w-4 text-muted-foreground" />
-                          <div>
-                            <p className="text-sm font-medium">{attachment.fileName}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatFileSize(attachment.fileSize)} • Uploaded by {uploader?.name} on {formatDate(attachment.uploadedAt)}
-                            </p>
-                          </div>
-                        </div>
-                        <Button variant="ghost" size="sm">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Comments ({task.comments.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {task.comments.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No comments yet</p>
-              ) : (
-                task.comments.map(comment => {
-                  const commentUser = mockUsers.find(u => u.id === comment.userId)
-                  return (
-                    <div key={comment.id} className="flex gap-3 p-3 rounded-lg bg-muted/50">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={commentUser?.avatar || undefined} />
-                        <AvatarFallback>{commentUser ? getInitials(commentUser.name) : '?'}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{commentUser?.name}</span>
-                          <span className="text-xs text-muted-foreground">{formatDate(comment.createdAt)}</span>
-                        </div>
-                        <p className="text-sm mt-1">{comment.content}</p>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-              <div className="flex gap-2 pt-4 border-t">
-                <Textarea
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  placeholder="Add a comment..."
-                  rows={2}
-                />
-                <Button onClick={handleAddComment} className="self-end">
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label className="text-sm text-muted-foreground">Status</Label>
-                <div className="mt-1">
-                  <StatusBadge status={task.status} />
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-sm text-muted-foreground">Priority</Label>
-                <div className="mt-1">
-                  <PriorityBadge priority={task.priority} />
-                </div>
-              </div>
-
-              <div className="pt-4 border-t">
-                <Label className="text-sm text-muted-foreground">Assigned To</Label>
-                {assignedUser ? (
-                  <div className="flex items-center gap-2 mt-2">
-                    <Avatar>
-                      <AvatarImage src={assignedUser.avatar || undefined} />
-                      <AvatarFallback>{getInitials(assignedUser.name)}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium">{assignedUser.name}</p>
-                      <p className="text-sm text-muted-foreground capitalize">{assignedUser.department}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground mt-1">Unassigned</p>
-                )}
-              </div>
-
-              <div className="pt-4 border-t">
-                <Label className="text-sm text-muted-foreground">Created By</Label>
-                {createdBy && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={createdBy.avatar || undefined} />
-                      <AvatarFallback className="text-xs">{getInitials(createdBy.name)}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium text-sm">{createdBy.name}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(task.createdAt)}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Time Tracking</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Estimated:</span>
-                <span className="font-medium">8 hours</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm mt-2">
-                <Clock className="h-4 w-4 text-green-600" />
-                <span className="text-muted-foreground">Logged:</span>
-                <span className="font-medium text-green-600">5 hours</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+      <div className="flex justify-end gap-4">
+        <Link href="/tasks">
+          <Button variant="outline">Back to List</Button>
+        </Link>
+        
+        {task.status === 'pending' && canComplete && (
+          <Button onClick={handleStart} disabled={actionLoading}>
+            <Play className="h-4 w-4 mr-2" />
+            Start Task
+          </Button>
+        )}
+        
+        {(task.status === 'in_progress' || task.status === 'review') && canComplete && (
+          <Button onClick={handleComplete} disabled={actionLoading}>
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Complete
+          </Button>
+        )}
+        
+        {canCancel && task.status !== 'completed' && task.status !== 'cancelled' && (
+          <Button variant="destructive" onClick={handleCancel} disabled={actionLoading}>
+            <XCircle className="h-4 w-4 mr-2" />
+            Cancel
+          </Button>
+        )}
       </div>
-
-      {showCompleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/80" onClick={() => setShowCompleteModal(false)} />
-          <Card className="fixed z-50 w-full max-w-lg">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Complete Task</CardTitle>
-                <Button variant="ghost" size="icon" onClick={() => setShowCompleteModal(false)}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Completion Remarks *</Label>
-                <Textarea
-                  value={completionRemarks}
-                  onChange={(e) => setCompletionRemarks(e.target.value)}
-                  placeholder="Describe what was accomplished..."
-                  rows={4}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Attachments (Optional)</Label>
-                <FileUpload
-                  onFilesChange={setCompletionFiles}
-                  maxFiles={5}
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setShowCompleteModal(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCompleteTask}>
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Mark as Complete
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   )
-}
-
-function Label({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <label className={className}>{children}</label>
 }

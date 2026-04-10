@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { getUserByEmail } from '@/lib/db/queries/users'
 import { createLoginLog } from '@/lib/db/queries/login-logs'
 import { createRefreshToken as createRefreshTokenRecord } from '@/lib/db/queries/refresh-tokens'
+import { getUserPermissions } from '@/lib/db/queries/permissions'
 import { verifyPassword } from '@/lib/auth/password'
 import { generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt'
 import { getIPLocation, getClientIP } from '@/lib/auth/ip-geolocation'
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
   try {
     const clientIP = getClientIP(request)
     
-    const rateLimit = checkLoginRateLimit(clientIP)
+    const rateLimit = await checkLoginRateLimit(clientIP)
     
     if (!rateLimit.allowed) {
       const remainingTime = rateLimit.resetAt 
@@ -125,10 +126,14 @@ export async function POST(request: NextRequest) {
       email: user.email,
       name: user.name,
       role: user.role,
+      permissions: await getUserPermissions(user.id),
       department: user.department,
       phone: user.phone,
       avatar: user.avatar,
       status: user.status,
+      managedBy: user.managedBy,
+      // SECURITY: CRIT-04 — Compensation data stripped from login response.
+      // Access via /api/users/[id]/compensation with compensation.manage permission.
     }
 
     const response = NextResponse.json({
@@ -146,7 +151,7 @@ export async function POST(request: NextRequest) {
       path: '/',
     })
 
-    resetLoginAttempts(clientIP)
+    await resetLoginAttempts(clientIP)
 
     return response
   } catch (error) {

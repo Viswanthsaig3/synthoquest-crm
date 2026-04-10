@@ -1,77 +1,69 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
 import { User, AuthState } from '@/types/user'
-import { createClient } from '@/lib/db/client'
+import { setAccessToken as setGlobalAccessToken } from '@/lib/api/client'
 
-const AuthContext = createContext<AuthState | undefined>(undefined)
+interface ExtendedAuthState extends AuthState {
+  getAccessToken: () => string | null
+  token: string | null
+}
+
+const AuthContext = createContext<ExtendedAuthState | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const supabase = createClient()
+
+  const getAccessToken = useCallback(() => accessToken, [accessToken])
 
   useEffect(() => {
-    checkSession()
+    silentRefresh()
   }, [])
 
-  async function checkSession() {
+  async function silentRefresh(): Promise<boolean> {
     try {
-      const storedUser = localStorage.getItem('crm_user')
-      const storedToken = localStorage.getItem('crm_access_token')
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      })
 
-      if (storedUser && storedToken) {
-        const response = await fetch('/api/auth/me', {
+      if (response.ok) {
+        const result = await response.json()
+        setAccessToken(result.data.accessToken)
+        setGlobalAccessToken(result.data.accessToken)
+
+        const meResponse = await fetch('/api/auth/me', {
           headers: {
-            'Authorization': `Bearer ${storedToken}`,
+            'Authorization': `Bearer ${result.data.accessToken}`,
           },
         })
 
-        if (response.ok) {
-          const result = await response.json()
-          setUser(result.data)
+        if (meResponse.ok) {
+          const meResult = await meResponse.json()
+          setUser(meResult.data)
           setIsAuthenticated(true)
-        } else {
-          const refreshToken = document.cookie
-            .split('; ')
-            .find(row => row.startsWith('refreshToken='))
-            ?.split('=')[1]
-
-          if (refreshToken) {
-            const refreshResponse = await fetch('/api/auth/refresh', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ refreshToken }),
-            })
-
-            if (refreshResponse.ok) {
-              const refreshResult = await refreshResponse.json()
-              localStorage.setItem('crm_access_token', refreshResult.data.accessToken)
-              
-              const meResponse = await fetch('/api/auth/me', {
-                headers: {
-                  'Authorization': `Bearer ${refreshResult.data.accessToken}`,
-                },
-              })
-
-              if (meResponse.ok) {
-                const meResult = await meResponse.json()
-                setUser(meResult.data)
-                setIsAuthenticated(true)
-                return
-              }
-            }
-          }
-
-          localStorage.removeItem('crm_user')
-          localStorage.removeItem('crm_access_token')
+          return true
         }
       }
+      
+      setUser(null)
+      setAccessToken(null)
+      setGlobalAccessToken(null)
+      setIsAuthenticated(false)
+      return false
     } catch (error) {
-      console.error('Session check error:', error)
-      localStorage.removeItem('crm_user')
-      localStorage.removeItem('crm_access_token')
+      console.error('Silent refresh error:', error)
+      setUser(null)
+      setAccessToken(null)
+      setGlobalAccessToken(null)
+      setIsAuthenticated(false)
+      return false
     } finally {
       setIsLoading(false)
     }
@@ -82,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password }),
       })
 
@@ -94,9 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await response.json()
       
       setUser(result.data.user)
+      setAccessToken(result.data.accessToken)
+      setGlobalAccessToken(result.data.accessToken)
       setIsAuthenticated(true)
-      localStorage.setItem('crm_user', JSON.stringify(result.data.user))
-      localStorage.setItem('crm_access_token', result.data.accessToken)
 
       return true
     } catch (error) {
@@ -107,28 +100,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      const token = localStorage.getItem('crm_access_token')
-      
-      if (token) {
+      if (accessToken) {
         await fetch('/api/auth/logout', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${accessToken}`,
           },
+          credentials: 'include',
         })
       }
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
       setUser(null)
+      setAccessToken(null)
+      setGlobalAccessToken(null)
       setIsAuthenticated(false)
-      localStorage.removeItem('crm_user')
-      localStorage.removeItem('crm_access_token')
     }
   }
 
   const refreshSession = async () => {
-    await checkSession()
+    await silentRefresh()
   }
 
   if (isLoading) {
@@ -140,7 +132,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, logout, refreshSession }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isAuthenticated, 
+      isLoading, 
+      login, 
+      logout, 
+      refreshSession,
+      getAccessToken,
+      token: accessToken,
+    }}>
       {children}
     </AuthContext.Provider>
   )

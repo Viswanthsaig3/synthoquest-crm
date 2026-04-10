@@ -1,14 +1,16 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/context/auth-context'
+import { getAccessToken } from '@/lib/api/client'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { PageHeader, StatusBadge, EmptyState } from '@/components/shared'
+import { EmptyState } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import {
   Table,
   TableBody,
@@ -17,258 +19,444 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getPendingTimesheetsByTeam } from '@/lib/mock-data/timesheets'
-import { mockUsers } from '@/lib/mock-data/users'
-import { formatDate, getInitials } from '@/lib/utils'
-import { getTeamMemberIds } from '@/lib/permissions'
-import { Clock, CheckCircle, XCircle, Eye, X, Calendar } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { hasPermission } from '@/lib/client-permissions'
+import { formatDate, getErrorMessage } from '@/lib/utils'
+import type { TimesheetPendingEntry } from '@/lib/db/queries/timesheets'
+
+interface PendingEntryGroup {
+  employeeName?: string
+  employeeEmail?: string
+  workDate?: string
+  entries: TimesheetPendingEntry[]
+}
+import { Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
+import { TimesheetsSubNav } from '@/components/timesheets/timesheets-subnav'
 
 export default function TimesheetApprovalsPage() {
   const { user } = useAuth()
   const { toast } = useToast()
-  const [rejectModal, setRejectModal] = useState<{ open: boolean; timesheetId: string | null }>({
+  const [pendingEntries, setPendingEntries] = useState<TimesheetPendingEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set())
+  const [rejectModal, setRejectModal] = useState<{ open: boolean; entryIds: string[] }>({
     open: false,
-    timesheetId: null,
+    entryIds: [],
   })
   const [rejectionReason, setRejectionReason] = useState('')
-  const [viewModal, setViewModal] = useState<{ open: boolean; timesheetId: string | null }>({
-    open: false,
-    timesheetId: null,
-  })
+  const [actionLoading, setActionLoading] = useState(false)
+  const canApprove = hasPermission(user, 'timesheets.approve')
 
-  const teamMemberIds = user ? getTeamMemberIds(user.id, mockUsers) : []
-  const pendingTimesheets = getPendingTimesheetsByTeam(teamMemberIds)
+  useEffect(() => {
+    if (user && canApprove) {
+      fetchPendingEntries()
+    }
+  }, [canApprove, user])
 
-  if (!user) return null
-
-  const handleApprove = (id: string) => {
-    toast({
-      title: 'Timesheet approved',
-      description: 'The timesheet has been approved successfully.',
-    })
-  }
-
-  const openRejectModal = (timesheetId: string) => {
-    setRejectModal({ open: true, timesheetId })
-    setRejectionReason('')
-  }
-
-  const handleReject = () => {
-    if (!rejectionReason.trim()) {
+  const fetchPendingEntries = async () => {
+    try {
+      const token = getAccessToken()
+      const response = await fetch('/api/timesheet-entries/pending?limit=200', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Failed to load entries')
+      setPendingEntries(result.data || [])
+    } catch (error: unknown) {
+      console.error('Error fetching pending entries:', error)
       toast({
-        title: 'Reason required',
-        description: 'Please provide a reason for rejection.',
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to load pending entries'),
         variant: 'destructive',
       })
-      return
+    } finally {
+      setLoading(false)
     }
+  }
+
+  if (!user || loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (!canApprove) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <TimesheetsSubNav />
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            You do not have permission to access approvals.
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  const handleApprove = async (entryIds: string[]) => {
+    if (entryIds.length === 0) return
     
-    toast({
-      title: 'Timesheet rejected',
-      description: 'The timesheet has been rejected.',
-      variant: 'destructive',
-    })
-    setRejectModal({ open: false, timesheetId: null })
-    setRejectionReason('')
+    setActionLoading(true)
+    try {
+      const token = getAccessToken()
+      if (entryIds.length === 1) {
+        const response = await fetch(`/api/timesheet-entries/${entryIds[0]}/approve`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Failed to approve entry')
+      } else {
+        const response = await fetch('/api/timesheet-entries/bulk-approve', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ entryIds }),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Failed to approve entries')
+      }
+      
+      toast({
+        title: 'Approved',
+        description: `${entryIds.length} ${entryIds.length === 1 ? 'entry' : 'entries'} approved successfully.`,
+      })
+      setSelectedEntries(new Set())
+      fetchPendingEntries()
+    } catch (error: unknown) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to approve'),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
   }
 
-  const openViewModal = (timesheetId: string) => {
-    setViewModal({ open: true, timesheetId })
+  const handleReject = async () => {
+    if (rejectModal.entryIds.length === 0 || !rejectionReason.trim()) return
+    
+    setActionLoading(true)
+    try {
+      const token = getAccessToken()
+      if (rejectModal.entryIds.length === 1) {
+        const response = await fetch(`/api/timesheet-entries/${rejectModal.entryIds[0]}/reject`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ reason: rejectionReason }),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Failed to reject entry')
+      } else {
+        const response = await fetch('/api/timesheet-entries/bulk-reject', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ entryIds: rejectModal.entryIds, reason: rejectionReason }),
+        })
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Failed to reject entries')
+      }
+      
+      toast({
+        title: 'Rejected',
+        description: `${rejectModal.entryIds.length} ${rejectModal.entryIds.length === 1 ? 'entry' : 'entries'} rejected.`,
+      })
+      setRejectModal({ open: false, entryIds: [] })
+      setRejectionReason('')
+      setSelectedEntries(new Set())
+      fetchPendingEntries()
+    } catch (error: unknown) {
+      toast({
+        title: 'Error',
+        description: getErrorMessage(error, 'Failed to reject'),
+        variant: 'destructive',
+      })
+    } finally {
+      setActionLoading(false)
+    }
   }
 
-  const selectedTimesheet = viewModal.timesheetId 
-    ? pendingTimesheets.find(ts => ts.id === viewModal.timesheetId)
-    : null
+  const toggleEntry = (entryId: string) => {
+    const newSelected = new Set(selectedEntries)
+    if (newSelected.has(entryId)) {
+      newSelected.delete(entryId)
+    } else {
+      newSelected.add(entryId)
+    }
+    setSelectedEntries(newSelected)
+  }
+
+  const toggleAll = () => {
+    if (selectedEntries.size === pendingEntries.length) {
+      setSelectedEntries(new Set())
+    } else {
+      setSelectedEntries(new Set(pendingEntries.map((e) => e.id)))
+    }
+  }
+
+  const groupedEntries = pendingEntries.reduce<Record<string, PendingEntryGroup>>((acc, entry) => {
+    const key = `${entry.employeeName}|${entry.workDate}`
+    if (!acc[key]) {
+      acc[key] = {
+        employeeName: entry.employeeName,
+        employeeEmail: entry.employeeEmail,
+        workDate: entry.workDate,
+        entries: [],
+      }
+    }
+    acc[key].entries.push(entry)
+    return acc
+  }, {})
+
+  const groups = (Object.values(groupedEntries) as PendingEntryGroup[]).sort((a, b) => {
+    return new Date(b.workDate ?? '').getTime() - new Date(a.workDate ?? '').getTime()
+  })
 
   return (
     <div className="space-y-6">
       <Breadcrumb />
-      
-      <PageHeader
-        title="Timesheet Approvals"
-        description={`${pendingTimesheets.length} daily timesheets pending approval`}
-      />
+      <TimesheetsSubNav />
 
-      <Card>
-        <CardContent className="p-0">
-          {pendingTimesheets.length === 0 ? (
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Pending Approvals</h1>
+          <p className="text-muted-foreground mt-1">
+            Review and approve time entries submitted by employees
+          </p>
+        </div>
+        {selectedEntries.size > 0 && (
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRejectModal({ open: true, entryIds: Array.from(selectedEntries) })}
+              disabled={actionLoading}
+            >
+              <XCircle className="h-4 w-4 mr-1" />
+              Reject ({selectedEntries.size})
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => handleApprove(Array.from(selectedEntries))}
+              disabled={actionLoading}
+            >
+              {actionLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-1" />
+                  Approve ({selectedEntries.size})
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {pendingEntries.length === 0 ? (
+        <Card>
+          <CardContent className="py-12">
             <EmptyState
               icon={Clock}
-              title="No pending approvals"
-              description="All timesheets have been reviewed."
+              title="No pending entries"
+              description="All time entries have been approved or rejected."
             />
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Day</TableHead>
-                  <TableHead>Hours</TableHead>
-                  <TableHead>Tasks</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingTimesheets.map((ts) => {
-                  const employee = mockUsers.find(u => u.id === ts.employeeId)
-                  return (
-                    <TableRow key={ts.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={employee?.avatar || undefined} />
-                            <AvatarFallback>{employee ? getInitials(employee.name) : '?'}</AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">{ts.employeeName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-muted-foreground" />
-                          {formatDate(ts.date)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {ts.date.toLocaleDateString('en-US', { weekday: 'short' })}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{ts.totalHours}h</Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {ts.entries.length} task{ts.entries.length > 1 ? 's' : ''}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => openViewModal(ts.id)}>
-                            <Eye className="h-4 w-4 mr-1" />
-                            View
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => handleApprove(ts.id)}>
-                            <CheckCircle className="h-4 w-4 mr-1 text-green-600" />
-                            Approve
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => openRejectModal(ts.id)}>
-                            <XCircle className="h-4 w-4 mr-1 text-red-600" />
-                            Reject
-                          </Button>
-                        </div>
-                      </TableCell>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((group, groupIndex: number) => (
+            <Card key={groupIndex}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-lg font-semibold">{group.employeeName}</CardTitle>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {formatDate(group.workDate ?? '')} • {group.entries.length} {group.entries.length === 1 ? 'entry' : 'entries'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRejectModal({ open: true, entryIds: group.entries.map((e) => e.id) })}
+                      disabled={actionLoading}
+                    >
+                      <XCircle className="h-4 w-4 mr-1" />
+                      Reject All
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleApprove(group.entries.map((e) => e.id))}
+                      disabled={actionLoading}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-1" />
+                      Approve All
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={group.entries.every((e) => selectedEntries.has(e.id))}
+                          onCheckedChange={() => {
+                            const allSelected = group.entries.every((e) => selectedEntries.has(e.id))
+                            const newSelected = new Set(selectedEntries)
+                            group.entries.forEach((e) => {
+                              if (allSelected) {
+                                newSelected.delete(e.id)
+                              } else {
+                                newSelected.add(e.id)
+                              }
+                            })
+                            setSelectedEntries(newSelected)
+                          }}
+                        />
+                      </TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Hours</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {group.entries.map((entry) => {
+                      const hours = entry.totalHours || 0
+                      return (
+                        <TableRow key={entry.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedEntries.has(entry.id)}
+                              onCheckedChange={() => toggleEntry(entry.id)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1 text-sm">
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                              {entry.startTime || '—'} - {entry.endTime || '—'}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm">{entry.description || '—'}</span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{hours.toFixed(1)}h</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {entry.billable ? (
+                              <Badge variant="default" className="text-xs">Billable</Badge>
+                            ) : (
+                              <Badge variant="secondary" className="text-xs">Non-billable</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRejectModal({ open: true, entryIds: [entry.id] })}
+                                disabled={actionLoading}
+                              >
+                                <XCircle className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleApprove([entry.id])}
+                                disabled={actionLoading}
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      {viewModal.open && selectedTimesheet && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/80" onClick={() => setViewModal({ open: false, timesheetId: null })} />
-          <Card className="fixed z-50 w-full max-w-lg">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Timesheet Details</CardTitle>
-                <Button variant="ghost" size="icon" onClick={() => setViewModal({ open: false, timesheetId: null })}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Employee</p>
-                  <p className="font-medium">{selectedTimesheet.employeeName}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Date</p>
-                  <p className="font-medium">{formatDate(selectedTimesheet.date)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Hours</p>
-                  <p className="font-medium">{selectedTimesheet.totalHours}h</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <StatusBadge status={selectedTimesheet.status} />
-                </div>
-              </div>
-
-              <div className="pt-4 border-t">
-                <p className="text-sm font-medium mb-3">Task Entries</p>
-                <div className="space-y-3">
-                  {selectedTimesheet.entries.map((entry, index) => (
-                    <div key={entry.id || index} className="p-3 rounded-lg bg-muted">
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="font-medium text-sm">{entry.taskTitle}</p>
-                        <Badge variant="outline">{entry.hours}h</Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{entry.description || 'No description'}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-4">
-                <Button variant="outline" onClick={() => setViewModal({ open: false, timesheetId: null })}>
-                  Close
-                </Button>
-                <Button variant="destructive" onClick={() => {
-                  setViewModal({ open: false, timesheetId: null })
-                  openRejectModal(selectedTimesheet.id)
-                }}>
-                  <XCircle className="h-4 w-4 mr-2" />
+      <Dialog open={rejectModal.open} onOpenChange={(open) => setRejectModal({ open, entryIds: [] })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Time {rejectModal.entryIds.length === 1 ? 'Entry' : 'Entries'}</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for rejecting {rejectModal.entryIds.length === 1 ? 'this entry' : 'these entries'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="reason">Reason</Label>
+            <Textarea
+              id="reason"
+              placeholder="Enter rejection reason..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRejectModal({ open: false, entryIds: [] })
+                setRejectionReason('')
+              }}
+              disabled={actionLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleReject}
+              disabled={actionLoading || !rejectionReason.trim()}
+            >
+              {actionLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  Rejecting...
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-4 w-4 mr-1" />
                   Reject
-                </Button>
-                <Button onClick={() => {
-                  handleApprove(selectedTimesheet.id)
-                  setViewModal({ open: false, timesheetId: null })
-                }}>
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Approve
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {rejectModal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/80" onClick={() => setRejectModal({ open: false, timesheetId: null })} />
-          <Card className="fixed z-50 w-full max-w-md">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Reject Timesheet</CardTitle>
-                <Button variant="ghost" size="icon" onClick={() => setRejectModal({ open: false, timesheetId: null })}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Rejection Reason *</label>
-                <Textarea
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  placeholder="Please provide a reason for rejecting this timesheet..."
-                  rows={4}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setRejectModal({ open: false, timesheetId: null })}>
-                  Cancel
-                </Button>
-                <Button variant="destructive" onClick={handleReject}>
-                  Reject Timesheet
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

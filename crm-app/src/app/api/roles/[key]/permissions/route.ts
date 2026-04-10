@@ -1,22 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { updateRolePermissions, getRoleWithPermissions } from '@/lib/db/queries/roles'
-import { hasPermissionStatic } from '@/lib/permissions'
+import { hasPermission, isAdmin } from '@/lib/auth/authorization'
 import { z } from 'zod'
 import { permissionCache } from '@/lib/permissions-cache'
 
 const updatePermissionsSchema = z.object({
-  permissions: z.array(z.string()).min(1),
+  permissions: z.array(z.string()),
 })
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ key: string }> }
+) {
+  return withAuth(request, async (user) => {
+    try {
+      const { key } = await params
+      const role = await getRoleWithPermissions(key)
+
+      if (!role) {
+        return NextResponse.json({ error: 'Role not found' }, { status: 404 })
+      }
+
+      return NextResponse.json({
+        data: {
+          id: role.id,
+          key: role.key,
+          name: role.name,
+          permissions: role.permissions,
+        },
+      })
+    } catch (error) {
+      console.error('Get role permissions error:', error)
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    }
+  })
+}
 
 export async function PUT(request: NextRequest, { params }: { params: { key: string } }) {
   return withAuth(request, async (user) => {
     try {
-      const canManage = hasPermissionStatic({ role: user.role } as any, 'roles.manage')
+      const canManage = await hasPermission(user, 'roles.manage')
       
-      if (!canManage) {
+      if (!canManage || !isAdmin(user)) {
         return NextResponse.json(
-          { error: 'Forbidden' },
+          { error: 'Only admin can update role permissions' },
           { status: 403 }
         )
       }
@@ -30,14 +58,6 @@ export async function PUT(request: NextRequest, { params }: { params: { key: str
         return NextResponse.json(
           { error: 'Role not found' },
           { status: 404 }
-        )
-      }
-
-      // Prevent modifying system roles unless admin
-      if (role.isSystem && user.role !== 'admin') {
-        return NextResponse.json(
-          { error: 'Cannot modify system roles' },
-          { status: 403 }
         )
       }
 

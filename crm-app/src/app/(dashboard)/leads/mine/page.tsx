@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState, PermissionGuard } from '@/components/shared'
@@ -9,11 +9,12 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { getLeadsByAssignee, mockLeads } from '@/lib/mock-data/leads'
-import { formatDate, formatTime } from '@/lib/utils'
+import { getLeads, getLeadCallRecords } from '@/lib/api/leads'
+import { formatDate } from '@/lib/utils'
 import { canCallLead, canConvertLead, canViewAssignedLeads } from '@/lib/permissions'
 import { LEAD_STATUSES, LEAD_PRIORITIES, COURSE_FEES } from '@/lib/constants'
-import { Users, Phone, Mail, Eye, Flame, Zap, Snowflake, Clock, Calendar, CheckCircle, XCircle, PhoneOff } from 'lucide-react'
+import type { Lead, CallRecord } from '@/lib/db/queries/leads'
+import { Users, Phone, Eye, Flame, Zap, Snowflake, Calendar, Loader2, PhoneOff } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -26,15 +27,49 @@ export default function MyLeadsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [activeTab, setActiveTab] = useState<'all' | 'follow_up'>('all')
+  const [loading, setLoading] = useState(true)
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [callRecords, setCallRecords] = useState<Record<string, CallRecord[]>>({})
 
-  if (!user) return null
-
-  const myLeads = getLeadsByAssignee(user.id)
-  const canCall = canCallLead(user)
-  const canConvert = canConvertLead(user)
+  useEffect(() => {
+    async function fetchLeads() {
+      if (!user) return
+      try {
+        setLoading(true)
+        const result = await getLeads({ assignedTo: user.id })
+        setLeads(result.data)
+        
+        // Fetch call records for each lead
+        const callPromises = result.data.map(async (lead) => {
+          try {
+            const calls = await getLeadCallRecords(lead.id)
+            return { leadId: lead.id, calls: calls.data }
+          } catch {
+            return { leadId: lead.id, calls: [] }
+          }
+        })
+        const callResults = await Promise.all(callPromises)
+        const callsMap: Record<string, CallRecord[]> = {}
+        callResults.forEach(r => {
+          callsMap[r.leadId] = r.calls
+        })
+        setCallRecords(callsMap)
+      } catch (error) {
+        console.error('Failed to fetch leads:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load your leads. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchLeads()
+  }, [user, toast])
 
   const filteredLeads = useMemo(() => {
-    return myLeads.filter(lead => {
+    return leads.filter(lead => {
       const matchesSearch = lead.name.toLowerCase().includes(search.toLowerCase()) ||
         lead.email.toLowerCase().includes(search.toLowerCase()) ||
         lead.phone.includes(search)
@@ -56,17 +91,22 @@ export default function MyLeadsPage() {
       const priorityOrder = { hot: 0, warm: 1, cold: 2 }
       return priorityOrder[a.priority] - priorityOrder[b.priority]
     })
-  }, [search, statusFilter, priorityFilter, activeTab, myLeads])
+  }, [search, statusFilter, priorityFilter, activeTab, leads])
 
   const leadsByStatus = useMemo(() => {
     return {
-      all: myLeads.length,
-      new: myLeads.filter(l => l.status === 'new').length,
-      contacted: myLeads.filter(l => l.status === 'contacted').length,
-      follow_up: myLeads.filter(l => l.status === 'follow_up' || l.nextFollowUpAt).length,
-      hot: myLeads.filter(l => l.priority === 'hot').length,
+      all: leads.length,
+      new: leads.filter(l => l.status === 'new').length,
+      contacted: leads.filter(l => l.status === 'contacted').length,
+      follow_up: leads.filter(l => l.status === 'follow_up' || l.nextFollowUpAt).length,
+      hot: leads.filter(l => l.priority === 'hot').length,
     }
-  }, [myLeads])
+  }, [leads])
+
+  if (!user) return null
+
+  const canCall = canCallLead(user)
+  const canConvert = canConvertLead(user)
 
   const handleCall = (leadId: string) => {
     router.push(`/leads/${leadId}?action=call`)
@@ -81,19 +121,13 @@ export default function MyLeadsPage() {
     }
   }
 
-  const getLastCallIcon = (outcome: string | null) => {
+  const getLastCallIcon = (outcome: string | null | undefined) => {
     if (!outcome) return null
     switch (outcome) {
       case 'answered': return <Phone className="h-3 w-3 text-green-500" />
       case 'no_answer': return <PhoneOff className="h-3 w-3 text-gray-400" />
       default: return <Phone className="h-3 w-3 text-yellow-500" />
     }
-  }
-
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}m ${secs}s`
   }
 
   return (
@@ -103,7 +137,7 @@ export default function MyLeadsPage() {
       
       <PageHeader
         title="My Leads"
-        description={`${myLeads.length} leads assigned to you`}
+        description={`${leads.length} leads assigned to you`}
       />
 
       <div className="flex gap-2 overflow-x-auto pb-2">
@@ -162,7 +196,13 @@ export default function MyLeadsPage() {
         </Select>
       </div>
 
-      {filteredLeads.length === 0 ? (
+      {loading ? (
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      ) : filteredLeads.length === 0 ? (
         <Card>
           <CardContent className="py-12">
             <EmptyState
@@ -179,6 +219,7 @@ export default function MyLeadsPage() {
         <div className="space-y-3">
           {filteredLeads.map((lead) => {
             const estValue = lead.courseInterested ? (COURSE_FEES[lead.courseInterested] || 0) : 0
+            const leadCalls = callRecords[lead.id] || []
             
             return (
               <Card key={lead.id} className="hover:shadow-md transition-shadow">
@@ -201,9 +242,9 @@ export default function MyLeadsPage() {
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           {getLastCallIcon(lead.lastCallOutcome)}
                           <span className="capitalize">{lead.lastCallOutcome.replace('_', ' ')}</span>
-                          {lead.callRecords.length > 0 && (
+                          {leadCalls.length > 0 && (
                             <span>
-                              - Last call: {formatDate(lead.callRecords[lead.callRecords.length - 1].createdAt)}
+                              - Last call: {formatDate(leadCalls[0].createdAt)}
                             </span>
                           )}
                         </div>

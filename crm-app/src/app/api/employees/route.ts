@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
-import { getUsers, createUser, updateUser } from '@/lib/db/queries/users'
-import { hasPermission } from '@/lib/permissions'
+import { getUsers, createUser } from '@/lib/db/queries/users'
+import { hasPermission } from '@/lib/auth/authorization'
+import { getRoleByKey } from '@/lib/db/queries/roles'
+import { hashPassword } from '@/lib/auth/password'
 import { z } from 'zod'
 
 const createEmployeeSchema = z.object({
@@ -10,8 +12,10 @@ const createEmployeeSchema = z.object({
   password: z.string().min(8),
   phone: z.string().optional(),
   department: z.string(),
-  role: z.enum(['admin', 'hr', 'team_lead', 'sales_rep', 'employee']),
+  role: z.string().min(2).max(64).regex(/^[a-z][a-z0-9_]*$/),
   salary: z.number().optional(),
+  compensationType: z.enum(['paid', 'unpaid']).optional(),
+  compensationAmount: z.number().min(0).nullable().optional(),
   managedBy: z.string().optional().nullable(),
 })
 
@@ -19,9 +23,11 @@ const updateEmployeeSchema = z.object({
   name: z.string().min(1).optional(),
   phone: z.string().optional(),
   department: z.string().optional(),
-  role: z.enum(['admin', 'hr', 'team_lead', 'sales_rep', 'employee']).optional(),
+  role: z.string().min(2).max(64).regex(/^[a-z][a-z0-9_]*$/).optional(),
   status: z.enum(['active', 'inactive', 'suspended']).optional(),
   salary: z.number().optional(),
+  compensationType: z.enum(['paid', 'unpaid']).optional(),
+  compensationAmount: z.number().min(0).nullable().optional(),
   managedBy: z.string().optional().nullable(),
   avatar: z.string().optional().nullable(),
 })
@@ -29,13 +35,11 @@ const updateEmployeeSchema = z.object({
 export async function GET(request: NextRequest) {
   return withAuth(request, async (user) => {
     try {
-      const canView = hasPermission({ role: user.role } as any, 'employees.view_all')
-      
-      if (!canView) {
-        return NextResponse.json(
-          { error: 'Forbidden' },
-          { status: 403 }
-        )
+      const canViewAll = await hasPermission(user, 'employees.view_all')
+      const canViewAssigned = await hasPermission(user, 'employees.manage_assigned')
+
+      if (!canViewAll && !canViewAssigned) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
       const page = parseInt(request.nextUrl.searchParams.get('page') || '1')
@@ -52,6 +56,7 @@ export async function GET(request: NextRequest) {
         role,
         status,
         search,
+        managedBy: canViewAssigned && !canViewAll ? user.userId : undefined,
       })
 
       return NextResponse.json({
@@ -76,7 +81,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withAuth(request, async (user) => {
     try {
-      const canManage = hasPermission({ role: user.role } as any, 'employees.manage')
+      const canManage = await hasPermission(user, 'employees.manage')
       
       if (!canManage) {
         return NextResponse.json(
@@ -87,19 +92,49 @@ export async function POST(request: NextRequest) {
 
       const body = await request.json()
       const validated = createEmployeeSchema.parse(body)
+      const canManageCompensation = await hasPermission(user, 'compensation.manage')
+
+      const requestedCompensationUpdate =
+        validated.salary !== undefined ||
+        validated.compensationType !== undefined ||
+        validated.compensationAmount !== undefined
+
+      if (requestedCompensationUpdate && !canManageCompensation) {
+        return NextResponse.json(
+          { error: 'Forbidden: compensation update not allowed' },
+          { status: 403 }
+        )
+      }
+
+      const role = await getRoleByKey(validated.role)
+      if (!role) {
+        return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+      }
 
       const { password, ...userData } = validated
 
+      const passwordHash = await hashPassword(password)
+
       const newUser = await createUser({
         ...userData,
-        passwordHash: password,
+        passwordHash,
         phone: userData.phone || '',
         managedBy: userData.managedBy || null,
+        compensationType:
+          userData.compensationType ??
+          (userData.salary !== undefined && userData.salary > 0 ? 'paid' : 'unpaid'),
+        compensationAmount:
+          userData.compensationAmount !== undefined
+            ? userData.compensationAmount
+            : userData.salary !== undefined && userData.salary > 0
+            ? userData.salary
+            : null,
         status: 'active',
         avatar: null,
       })
-
-      const { password_hash, ...userResponse } = newUser
+      const { password_hash, ...userResponse } = newUser as typeof newUser & {
+        password_hash?: string
+      }
 
       return NextResponse.json({
         data: userResponse,

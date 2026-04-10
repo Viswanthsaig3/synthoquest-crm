@@ -3,7 +3,7 @@ import { withAuth } from '@/lib/auth/middleware'
 import { getUserById, updateUserPassword } from '@/lib/db/queries/users'
 import { revokeAllUserTokens } from '@/lib/db/queries/refresh-tokens'
 import { hashPassword, verifyPassword, validatePasswordStrength } from '@/lib/auth/password'
-import { hasPermission } from '@/lib/permissions'
+import { hasPermission } from '@/lib/auth/authorization'
 import { z } from 'zod'
 
 const changePasswordSchema = z.object({
@@ -24,7 +24,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       }
 
       const isOwnProfile = employee.id === user.userId
-      const canManage = hasPermission({ role: user.role } as any, 'employees.manage')
+      const canManage = await hasPermission(user, 'employees.manage')
 
       if (!isOwnProfile && !canManage) {
         return NextResponse.json(

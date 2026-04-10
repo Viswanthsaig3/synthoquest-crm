@@ -2,19 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { revokeAllUserTokens } from '@/lib/db/queries/refresh-tokens'
 import { createAdminClient } from '@/lib/db/server-client'
+import { createHash } from 'crypto'
+import { autoCheckoutOnLogout } from '@/lib/db/queries/attendance'
 
 export async function POST(request: NextRequest) {
   return withAuth(request, async (user) => {
     try {
+      await autoCheckoutOnLogout(user.userId)
+
       const refreshToken = request.cookies.get('refreshToken')?.value
       
       if (refreshToken) {
+        const refreshTokenHash = createHash('sha256')
+          .update(refreshToken)
+          .digest('hex')
+
         const supabase = await createAdminClient()
         
         const { data: tokenData } = await supabase
           .from('refresh_tokens')
           .select('id')
-          .eq('token_hash', refreshToken)
+          .eq('token_hash', refreshTokenHash)
           .single()
         
         if (tokenData) {

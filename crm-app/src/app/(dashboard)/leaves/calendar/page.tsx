@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,10 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Select } from '@/components/ui/select'
-import { mockLeaves } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
+
 import { formatDate, getInitials } from '@/lib/utils'
-import { getManagedUsers, getTeamMemberIds } from '@/lib/permissions'
+import { hasPermission } from '@/lib/client-permissions'
 import { 
   Calendar, 
   ChevronLeft, 
@@ -20,9 +19,13 @@ import {
   FileText,
   CheckCircle,
   XCircle,
-  Clock
+  Clock,
+  Loader2
 } from 'lucide-react'
 import Link from 'next/link'
+import { LeavesSubNav } from '@/components/leaves/leaves-subnav'
+import type { Leave } from '@/types/leave'
+import type { User } from '@/types/user'
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -36,29 +39,64 @@ const LEAVE_COLORS = {
 }
 
 export default function LeaveCalendarPage() {
-  const { user } = useAuth()
+  const { user, token } = useAuth()
+  const [loading, setLoading] = useState(true)
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedEmployee, setSelectedEmployee] = useState<string>('')
-  const [viewMode, setViewMode] = useState<'month' | 'week'>('month')
+  const [filteredLeaves, setFilteredLeaves] = useState<Leave[]>([])
+  const [managedUsers, setManagedUsers] = useState<User[]>([])
+
+  useEffect(() => {
+    if (!user || !token) return
+    
+    async function fetchData() {
+      try {
+        const year = currentDate.getFullYear()
+        const month = currentDate.getMonth() + 1
+        
+        const [leavesRes, usersRes] = await Promise.all([
+          fetch(`/api/leaves?year=${year}&month=${month}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          }),
+          hasPermission(user, 'leaves.approve') 
+            ? fetch('/api/employees', {
+                headers: { Authorization: `Bearer ${token}` }
+              })
+            : Promise.resolve(null)
+        ])
+        
+        if (leavesRes.ok) {
+          const data = await leavesRes.json()
+          setFilteredLeaves(data.data || [])
+        }
+        
+        if (usersRes && usersRes.ok) {
+          const data = await usersRes.json()
+          setManagedUsers(data.data || [])
+        }
+      } catch (error) {
+        console.error('Error fetching calendar data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchData()
+  }, [user, token, currentDate])
 
   if (!user) return null
 
-  const isAdmin = user.role === 'admin' || user.role === 'hr' || user.role === 'team_lead'
-  const managedUsers = getManagedUsers(user, mockUsers)
-  const teamMemberIds = getTeamMemberIds(user.id, mockUsers)
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
-  const visibleEmployeeIds = user.role === 'admin' || user.role === 'hr'
-    ? mockUsers.filter(u => u.role === 'employee' || u.role === 'sales_rep').map(u => u.id)
-    : [...teamMemberIds, user.id]
-
-  const filteredLeaves = useMemo(() => {
-    let leaves = mockLeaves.filter(l => visibleEmployeeIds.includes(l.employeeId))
-    if (selectedEmployee) {
-      leaves = leaves.filter(l => l.employeeId === selectedEmployee)
-    }
-    return leaves
-  }, [visibleEmployeeIds, selectedEmployee])
-
+  const isAdmin = hasPermission(user, 'leaves.approve')
+  const visibleEmployeeIds = managedUsers.map(u => u.id)
+  
   const currentMonth = currentDate.getMonth()
   const currentYear = currentDate.getFullYear()
 
@@ -104,7 +142,7 @@ export default function LeaveCalendarPage() {
            currentMonth === today.getMonth() && 
            currentYear === today.getFullYear()
   }
-
+  
   const employeeOptions = [
     { value: '', label: 'All Team Members' },
     ...managedUsers.map(u => ({ value: u.id, label: u.name }))
@@ -116,7 +154,8 @@ export default function LeaveCalendarPage() {
   return (
     <div className="space-y-6">
       <Breadcrumb />
-      
+      <LeavesSubNav />
+
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Leave Calendar</h1>
@@ -261,22 +300,22 @@ export default function LeaveCalendarPage() {
                     {day}
                   </div>
                   <div className="space-y-1">
-                    {dayLeaves.slice(0, 3).map((leave) => {
-                      const employee = mockUsers.find(u => u.id === leave.employeeId)
-                      return (
-                        <div
-                          key={leave.id}
-                          className={`text-xs p-1 rounded truncate ${LEAVE_COLORS[leave.type]}`}
-                          title={`${employee?.name}: ${leave.type} (${leave.status})`}
-                        >
-                          {employee?.name.split(' ')[0]} - {leave.type}
-                        </div>
-                      )
-                    })}
-                    {dayLeaves.length > 3 && (
-                      <div className="text-xs text-muted-foreground text-center">
-                        +{dayLeaves.length - 3} more
+                    {dayLeaves.slice(0, 2).map((leave) => (
+                      <div
+                        key={leave.id}
+                        className={`text-xs px-1 py-0.5 rounded truncate ${LEAVE_COLORS[leave.type]}`}
+                        title={`${leave.employeeName}: ${leave.type}`}
+                      >
+                        {leave.employeeName}
                       </div>
+                    ))}
+                    {dayLeaves.length > 2 && (
+                      <div className="text-xs text-muted-foreground px-1">
+                        +{dayLeaves.length - 2} more
+                      </div>
+                    )}
+                    {dayLeaves.length === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-2 opacity-50">-</p>
                     )}
                   </div>
                 </div>

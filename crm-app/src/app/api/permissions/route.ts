@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { getAllPermissions } from '@/lib/db/queries/permissions'
-import { hasPermissionStatic } from '@/lib/permissions'
+import { hasPermission } from '@/lib/auth/authorization'
 
 export async function GET(request: NextRequest) {
   return withAuth(request, async (user) => {
     try {
-      const canManage = hasPermissionStatic({ role: user.role } as any, 'roles.manage')
+      const canManage = await hasPermission(user, 'roles.manage')
       
       if (!canManage) {
         return NextResponse.json(
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
           action: perm.action,
         })
         return acc
-      }, {} as Record<string, any[]>)
+      }, {} as Record<string, { id: string; key: string; name: string; description: string | null; action: string }[]>)
 
       return NextResponse.json({
         data: grouped,

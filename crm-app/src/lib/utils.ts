@@ -9,19 +9,21 @@ export function generateId(): string {
   return Math.random().toString(36).substring(2, 15)
 }
 
-export function formatDate(date: Date): string {
+export function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
-  }).format(date)
+  }).format(d)
 }
 
-export function formatTime(date: Date): string {
+export function formatTime(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
   return new Intl.DateTimeFormat('en-US', {
     hour: '2-digit',
     minute: '2-digit'
-  }).format(date)
+  }).format(d)
 }
 
 export function formatCurrency(amount: number): string {
@@ -79,4 +81,16 @@ export function formatFileSize(bytes: number): string {
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+export function getErrorMessage(error: unknown, fallback = 'Something went wrong'): string {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error
+  }
+
+  return fallback
 }

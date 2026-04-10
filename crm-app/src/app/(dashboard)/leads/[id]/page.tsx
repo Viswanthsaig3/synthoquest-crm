@@ -9,19 +9,21 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { StatusBadge } from '@/components/shared'
-import { mockLeads, getLeadById } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
-import { formatDate, getInitials, cn, formatTime } from '@/lib/utils'
+import { getLeadById, getLeadActivities, getLeadCallRecords, claimLead, getLeadTypes } from '@/lib/api/leads'
+import { getEmployees } from '@/lib/api/employees'
+import { formatDate, getInitials } from '@/lib/utils'
 import { canClaimLead, canCallLead, canConvertLead, canEditLead } from '@/lib/permissions'
+import { hasPermission } from '@/lib/client-permissions'
 import { COURSE_FEES } from '@/lib/constants'
 import { CallModal } from '@/components/leads/call-modal'
 import { ConversionModal } from '@/components/leads/conversion-modal'
-import { CallRecord } from '@/types/lead'
+import type { Lead, LeadActivity, CallRecord } from '@/lib/db/queries/leads'
+import type { LeadType } from '@/types/lead-type'
+import type { User } from '@/types/user'
 import { useToast } from '@/components/ui/toast'
 import { 
   ArrowLeft, 
   Edit, 
-  Trash2, 
   Phone, 
   Mail, 
   Calendar,
@@ -29,14 +31,12 @@ import {
   MessageSquare,
   CheckCircle,
   XCircle,
-  Clock,
   GraduationCap,
   Flame,
   Zap,
   Snowflake,
   Play,
-  FileText,
-  ExternalLink
+  Loader2
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -44,7 +44,7 @@ const activityIcons: Record<string, React.ReactNode> = {
   created: <UserPlus className="h-4 w-4 text-blue-600" />,
   claimed: <UserPlus className="h-4 w-4 text-purple-600" />,
   contacted: <Phone className="h-4 w-4 text-yellow-600" />,
-  follow_up: <Clock className="h-4 w-4 text-purple-600" />,
+  follow_up: <Calendar className="h-4 w-4 text-purple-600" />,
   converted: <CheckCircle className="h-4 w-4 text-green-600" />,
   lost: <XCircle className="h-4 w-4 text-red-600" />,
   note: <MessageSquare className="h-4 w-4 text-gray-600" />,
@@ -58,9 +58,54 @@ export default function LeadDetailPage() {
   const { user } = useAuth()
   const { toast } = useToast()
   const leadId = params.id as string
-  const [lead, setLead] = useState(getLeadById(leadId))
+  
+  const [loading, setLoading] = useState(true)
+  const [lead, setLead] = useState<Lead | null>(null)
+  const [activities, setActivities] = useState<LeadActivity[]>([])
+  const [callRecords, setCallRecords] = useState<CallRecord[]>([])
+  const [leadTypes, setLeadTypes] = useState<LeadType[]>([])
+  const [employees, setEmployees] = useState<User[]>([])
   const [showCallModal, setShowCallModal] = useState(false)
   const [showConversionModal, setShowConversionModal] = useState(false)
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true)
+        const [leadRes, typesRes, employeesRes] = await Promise.all([
+          getLeadById(leadId),
+          getLeadTypes(),
+          getEmployees(),
+        ])
+        
+        setLead(leadRes.data)
+        setLeadTypes(typesRes.data)
+        setEmployees(employeesRes.data)
+        
+        // Fetch activities and call records
+        try {
+          const [activitiesRes, callsRes] = await Promise.all([
+            getLeadActivities(leadId),
+            getLeadCallRecords(leadId),
+          ])
+          setActivities(activitiesRes.data)
+          setCallRecords(callsRes.data)
+        } catch (e) {
+          console.error('Failed to fetch activities/calls:', e)
+        }
+      } catch (error) {
+        console.error('Failed to fetch lead:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load lead details. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [leadId, toast])
 
   useEffect(() => {
     const action = searchParams.get('action')
@@ -69,7 +114,22 @@ export default function LeadDetailPage() {
     }
   }, [searchParams, lead, user])
 
-  if (!user || !lead) {
+  if (!user) return null
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!lead) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
@@ -85,18 +145,32 @@ export default function LeadDetailPage() {
     )
   }
 
-  const assignedUser = mockUsers.find(u => u.id === lead.assignedTo)
+  const assignedUser = lead.assignedTo ? employees.find(u => u.id === lead.assignedTo) : undefined
+  const leadType = leadTypes.find(lt => lt.id === lead.typeId)
   const canEdit = canEditLead(user)
   const canCall = canCallLead(user) && lead.assignedTo === user.id
   const canConvert = canConvertLead(user) && lead.assignedTo === user.id && lead.status !== 'converted'
   const canClaim = canClaimLead(user) && !lead.assignedTo
 
-  const handleClaim = () => {
-    toast({
-      title: 'Lead claimed',
-      description: 'You can now call this lead.',
-    })
-    setShowCallModal(true)
+  const handleClaim = async () => {
+    try {
+      await claimLead(leadId)
+      toast({
+        title: 'Lead claimed',
+        description: 'You can now call this lead.',
+      })
+      setShowCallModal(true)
+      // Refresh lead data
+      const result = await getLeadById(leadId)
+      setLead(result.data)
+    } catch (error) {
+      console.error('Failed to claim lead:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to claim lead. Please try again.',
+        variant: 'destructive',
+      })
+    }
   }
 
   const handleCallComplete = (callRecord: Partial<CallRecord>) => {
@@ -140,7 +214,7 @@ export default function LeadDetailPage() {
       
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href={user.role === 'sales_rep' ? '/leads/mine' : '/leads'}>
+          <Link href={hasPermission(user, 'leads.claim') ? '/leads/mine' : '/leads'}>
             <Button variant="ghost" size="icon">
               <ArrowLeft className="h-4 w-4" />
             </Button>
@@ -151,7 +225,7 @@ export default function LeadDetailPage() {
               <StatusBadge status={lead.status} />
               {getPriorityIcon(lead.priority)}
             </div>
-            <p className="text-muted-foreground">{lead.courseInterested || lead.typeName}</p>
+            <p className="text-muted-foreground">{lead.courseInterested || leadType?.name}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -256,7 +330,7 @@ export default function LeadDetailPage() {
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2">
                   <Phone className="h-5 w-5" />
-                  Call History ({lead.callRecords.length})
+                  Call History ({callRecords.length})
                 </CardTitle>
                 {canCall && (
                   <Button size="sm" onClick={() => setShowCallModal(true)}>
@@ -267,11 +341,11 @@ export default function LeadDetailPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {lead.callRecords.length === 0 ? (
+              {callRecords.length === 0 ? (
                 <p className="text-muted-foreground text-center py-4">No calls made yet</p>
               ) : (
                 <div className="space-y-3">
-                  {lead.callRecords.map((call) => (
+                  {callRecords.map((call) => (
                     <div key={call.id} className="p-4 rounded-lg border">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -315,31 +389,35 @@ export default function LeadDetailPage() {
               <CardTitle>Activity Timeline</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {lead.timeline.map((activity, index) => (
-                  <div key={activity.id} className="flex gap-4">
-                    <div className="flex flex-col items-center">
-                      <div className="p-2 rounded-full bg-muted">
-                        {activityIcons[activity.type]}
+              {activities.length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">No activity yet</p>
+              ) : (
+                <div className="space-y-4">
+                  {activities.map((activity, index) => (
+                    <div key={activity.id} className="flex gap-4">
+                      <div className="flex flex-col items-center">
+                        <div className="p-2 rounded-full bg-muted">
+                          {activityIcons[activity.type] || <MessageSquare className="h-4 w-4 text-gray-600" />}
+                        </div>
+                        {index < activities.length - 1 && (
+                          <div className="w-0.5 h-full bg-border mt-2" />
+                        )}
                       </div>
-                      {index < lead.timeline.length - 1 && (
-                        <div className="w-0.5 h-full bg-border mt-2" />
-                      )}
+                      <div className="flex-1 pb-4">
+                        <p className="font-medium capitalize">
+                          {activity.type.replace('_', ' ')}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {activity.description}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatDate(activity.createdAt)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-1 pb-4">
-                      <p className="font-medium capitalize">
-                        {activity.type.replace('_', ' ')}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {activity.description}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {formatDate(activity.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -448,7 +526,7 @@ export default function LeadDetailPage() {
         </div>
       </div>
 
-      {showCallModal && user && (
+      {showCallModal && user && lead && (
         <CallModal
           lead={lead}
           callerId={user.id}
@@ -458,7 +536,7 @@ export default function LeadDetailPage() {
         />
       )}
 
-      {showConversionModal && user && (
+      {showConversionModal && user && lead && (
         <ConversionModal
           lead={lead}
           converterId={user.id}

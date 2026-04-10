@@ -117,32 +117,31 @@ export const TASK_PRIORITIES = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
+  { value: 'urgent', label: 'Urgent' },
+]
+
+export const TASK_TYPES = [
+  'task',
+  'bug',
+  'feature',
+  'maintenance',
+  'training',
+  'meeting',
 ]
 
 export const TASK_STATUSES = [
-  { value: 'todo', label: 'To Do' },
+  { value: 'pending', label: 'Pending' },
   { value: 'in_progress', label: 'In Progress' },
-  { value: 'done', label: 'Done' },
+  { value: 'review', label: 'Review' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'on_hold', label: 'On Hold' },
 ]
 
 export const LEAVE_TYPES = [
   { value: 'sick', label: 'Sick Leave' },
   { value: 'casual', label: 'Casual Leave' },
   { value: 'paid', label: 'Paid Leave' },
-]
-
-export const DEPARTMENTS = [
-  { value: 'sales', label: 'Sales' },
-  { value: 'training', label: 'Training' },
-  { value: 'marketing', label: 'Marketing' },
-]
-
-export const ROLES = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'hr', label: 'HR Manager' },
-  { value: 'team_lead', label: 'Team Lead' },
-  { value: 'sales_rep', label: 'Sales Representative' },
-  { value: 'employee', label: 'Employee' },
 ]
 
 export const MONTHS = [

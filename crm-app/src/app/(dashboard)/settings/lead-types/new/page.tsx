@@ -3,7 +3,6 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/auth-context'
-import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +12,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/toast'
 import { LEAD_TYPE_ICONS, LEAD_TYPE_COLORS, FIELD_TYPES, CONVERSION_TARGETS } from '@/lib/constants'
-import { createLeadType, mockLeadTypes } from '@/lib/mock-data/lead-types'
 import { generateId } from '@/lib/utils'
 import { 
   ArrowLeft, 
@@ -26,7 +24,32 @@ import {
   ChevronUp
 } from 'lucide-react'
 import Link from 'next/link'
-import { LeadTypeField, LeadTypeStatus, LeadTypeSource } from '@/types/lead-type'
+import {
+  LeadTypeField,
+  LeadTypeStatus,
+  LeadTypeSource,
+  type ConversionTarget,
+  type FieldType,
+} from '@/types/lead-type'
+
+interface CreateLeadTypePayload {
+  name: string
+  description: string
+  icon: string
+  color: string
+  conversionTarget: ConversionTarget
+  approvalRequired: boolean
+  approverRoles: string[]
+  assignToRoles: string[]
+  fields: LeadTypeField[]
+  statuses: LeadTypeStatus[]
+  sources: LeadTypeSource[]
+  createdBy: string
+}
+
+async function createLeadTypeStub(data: CreateLeadTypePayload): Promise<{ id: string } & CreateLeadTypePayload> {
+  return { id: `lt_${Date.now()}`, ...data }
+}
 
 export default function NewLeadTypePage() {
   const router = useRouter()
@@ -71,14 +94,14 @@ export default function NewLeadTypePage() {
     setLoading(true)
     
     await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    const newLeadType = createLeadType({
+
+    await createLeadTypeStub({
       ...formData,
       fields,
       statuses,
       sources,
       createdBy: user?.id || '',
-      conversionTarget: formData.conversionTarget as any,
+      conversionTarget: formData.conversionTarget as ConversionTarget,
     })
     
     toast({
@@ -147,8 +170,6 @@ export default function NewLeadTypePage() {
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <Breadcrumb />
-      
       <div className="flex items-center gap-4">
         <Link href="/settings/lead-types">
           <Button variant="ghost" size="icon">
@@ -285,7 +306,7 @@ export default function NewLeadTypePage() {
             {fields.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <p>No custom fields defined.</p>
-                <p className="text-sm">Click "Add Field" to create custom fields for this lead type.</p>
+                <p className="text-sm">{`Click "Add Field" to create custom fields for this lead type.`}</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -320,7 +341,7 @@ export default function NewLeadTypePage() {
                         <Label>Type</Label>
                         <Select
                           value={field.type}
-                          onChange={(e) => updateField(field.id, { type: e.target.value as any })}
+                          onChange={(e) => updateField(field.id, { type: e.target.value as FieldType })}
                         >
                           {FIELD_TYPES.map(ft => (
                             <option key={ft.value} value={ft.value}>{ft.label}</option>

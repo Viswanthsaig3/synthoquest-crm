@@ -1,12 +1,11 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState, PermissionGuard } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import {
   Table,
   TableBody,
@@ -15,47 +14,114 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockPayroll, getPayrollByEmployee, getPayrollStats } from '@/lib/mock-data'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { Select } from '@/components/ui/select'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+
+import { formatCurrency } from '@/lib/utils'
 import { canViewAllPayroll, canViewOwnPayroll, canProcessPayroll } from '@/lib/permissions'
-import { DollarSign, Download, Eye, FileText, Play, IndianRupee } from 'lucide-react'
+import { DollarSign, Download, Eye, FileText, Play, IndianRupee, Clock } from 'lucide-react'
 import Link from 'next/link'
+import { fetchPayrollRecords, fetchPayrollSummary } from '@/lib/api/payroll'
+import { useToast } from '@/components/ui/toast'
+import type { PayrollRecordWithEmployee, PayrollSummary, MONTH_NAMES } from '@/types/payroll'
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const
 
 export default function PayrollPage() {
   const { user } = useAuth()
+  const { toast } = useToast()
+  const [records, setRecords] = useState<PayrollRecordWithEmployee[]>([])
+  const [summary, setSummary] = useState<PayrollSummary | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [filterMonth, setFilterMonth] = useState<number>(new Date().getMonth() + 1)
+  const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear())
+
+  const showAllPayroll = user ? canViewAllPayroll(user) : false
+  const canProcess = user ? canProcessPayroll(user) : false
+
+  const loadData = useCallback(async () => {
+    if (!user) return
+    setIsLoading(true)
+    try {
+      const [recordsResult, summaryResult] = await Promise.all([
+        fetchPayrollRecords({
+          month: filterMonth,
+          year: filterYear,
+          page: 1,
+          limit: 50,
+        }),
+        fetchPayrollSummary(filterMonth, filterYear),
+      ])
+      setRecords(recordsResult.data)
+      setSummary(summaryResult)
+    } catch (error) {
+      console.error('Failed to load payroll data:', error)
+      toast({ title: 'Error', description: 'Failed to load payroll data', variant: 'destructive' })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user, filterMonth, filterYear, toast])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
   if (!user) return null
 
-  const showAllPayroll = canViewAllPayroll(user)
-  const canProcess = canProcessPayroll(user)
-  const payrollRecords = showAllPayroll
-    ? mockPayroll
-    : getPayrollByEmployee(user.id)
-
-  const stats = getPayrollStats()
-
-  const currentMonthPayroll = payrollRecords.find(p => 
-    p.month === 'January' && p.year === 2024 && (showAllPayroll || p.employeeId === user.id)
-  )
+  const stats = summary || {
+    totalPaid: 0, totalProcessed: 0, totalPending: 0,
+    paidCount: 0, processedCount: 0, pendingCount: 0, totalEmployees: 0,
+  }
 
   return (
     <PermissionGuard check={(u) => canViewAllPayroll(u) || canViewOwnPayroll(u)} fallbackMessage="You don't have permission to view payroll.">
       <div className="space-y-6">
         <Breadcrumb />
-      
+
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <PageHeader
           title="Payroll"
-          description={showAllPayroll ? "Manage employee payroll and payslips" : "View your salary and payslip history"}
+          description={showAllPayroll ? 'Manage employee payroll and payslips' : 'View your salary and payslip history'}
         />
-        {canProcess && (
-          <Link href="/payroll/run">
-            <Button>
-              <Play className="h-4 w-4 mr-2" />
-              Run Payroll
-            </Button>
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          <Select
+            value={String(filterMonth)}
+            onChange={(e) => setFilterMonth(Number(e.target.value))}
+            className="w-36"
+          >
+            {MONTHS.map((m, i) => (
+              <option key={m} value={i + 1}>{m}</option>
+            ))}
+          </Select>
+          <Select
+            value={String(filterYear)}
+            onChange={(e) => setFilterYear(Number(e.target.value))}
+            className="w-28"
+          >
+            {[2024, 2025, 2026].map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </Select>
+          {showAllPayroll && (
+            <Link href="/payroll/hours">
+              <Button variant="outline">
+                <Clock className="h-4 w-4 mr-2" />
+                Hours Tracker
+              </Button>
+            </Link>
+          )}
+          {canProcess && (
+            <Link href="/payroll/run">
+              <Button>
+                <Play className="h-4 w-4 mr-2" />
+                Run Payroll
+              </Button>
+            </Link>
+          )}
+        </div>
       </div>
 
       {showAllPayroll && (
@@ -104,7 +170,7 @@ export default function PayrollPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Records</p>
-                  <p className="text-2xl font-bold">{stats.paidCount + stats.processedCount + stats.pendingCount}</p>
+                  <p className="text-2xl font-bold">{stats.totalEmployees}</p>
                 </div>
                 <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
                   <FileText className="h-5 w-5 text-purple-600" />
@@ -115,93 +181,62 @@ export default function PayrollPage() {
         </div>
       )}
 
-      {currentMonthPayroll && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Current Month - {currentMonthPayroll.month} {currentMonthPayroll.year}</CardTitle>
-              <StatusBadge status={currentMonthPayroll.status} />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div>
-                <p className="text-sm text-muted-foreground">Gross Salary</p>
-                <p className="text-2xl font-bold">{formatCurrency(currentMonthPayroll.salary.gross)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Deductions</p>
-                <p className="text-2xl font-bold text-red-600">-{formatCurrency(currentMonthPayroll.salary.deductions)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Days Worked</p>
-                <p className="text-2xl font-bold">{currentMonthPayroll.daysWorked}/{currentMonthPayroll.daysInMonth}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Net Salary</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(currentMonthPayroll.salary.net)}</p>
-              </div>
-            </div>
-
-            <div className="mt-6 pt-6 border-t">
-              <h4 className="font-medium mb-4">Salary Breakdown</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-3 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">Basic</p>
-                  <p className="font-semibold">{formatCurrency(currentMonthPayroll.salary.basic)}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">HRA</p>
-                  <p className="font-semibold">{formatCurrency(currentMonthPayroll.salary.hra)}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">Allowances</p>
-                  <p className="font-semibold">{formatCurrency(currentMonthPayroll.salary.allowances)}</p>
-                </div>
-                <div className="p-3 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">Deductions</p>
-                  <p className="font-semibold text-red-600">{formatCurrency(currentMonthPayroll.salary.deductions)}</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader>
-          <CardTitle>Payslip History</CardTitle>
+          <CardTitle>
+            Payslip History - {MONTHS[filterMonth - 1]} {filterYear}
+          </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {payrollRecords.length === 0 ? (
+          {isLoading ? (
+            <div className="text-center py-8 text-muted-foreground">Loading...</div>
+          ) : records.length === 0 ? (
             <EmptyState
               icon={DollarSign}
               title="No payroll records"
-              description="Payroll records will appear here."
+              description="Payroll records will appear here after running payroll."
             />
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   {showAllPayroll && <TableHead>Employee</TableHead>}
-                  <TableHead>Month</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Gross</TableHead>
                   <TableHead>Deductions</TableHead>
                   <TableHead>Net</TableHead>
+                  <TableHead>Days Worked</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payrollRecords.map((payroll) => (
+                {records.map((payroll) => (
                   <TableRow key={payroll.id}>
                     {showAllPayroll && (
-                      <TableCell className="font-medium">{payroll.employeeName}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-7 w-7">
+                            <AvatarFallback className="text-xs">
+                              {payroll.employeeName?.split(' ').map((n) => n[0]).join('') || '?'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-medium text-sm">{payroll.employeeName}</p>
+                            <p className="text-xs text-muted-foreground">{payroll.employeeDepartment}</p>
+                          </div>
+                        </div>
+                      </TableCell>
                     )}
-                    <TableCell>{payroll.month} {payroll.year}</TableCell>
-                    <TableCell>{formatCurrency(payroll.salary.gross)}</TableCell>
-                    <TableCell className="text-red-600">{formatCurrency(payroll.salary.deductions)}</TableCell>
-                    <TableCell className="font-semibold text-green-600">{formatCurrency(payroll.salary.net)}</TableCell>
+                    <TableCell>
+                      <span className="text-xs px-2 py-1 rounded-full bg-muted capitalize">
+                        {payroll.workerType.replace('_', ' ')}
+                      </span>
+                    </TableCell>
+                    <TableCell>{formatCurrency(payroll.grossEarnings)}</TableCell>
+                    <TableCell className="text-red-600">{formatCurrency(payroll.totalDeductions)}</TableCell>
+                    <TableCell className="font-semibold text-green-600">{formatCurrency(payroll.netPay)}</TableCell>
+                    <TableCell>{payroll.presentDays}/{payroll.totalDays}</TableCell>
                     <TableCell>
                       <StatusBadge status={payroll.status} />
                     </TableCell>

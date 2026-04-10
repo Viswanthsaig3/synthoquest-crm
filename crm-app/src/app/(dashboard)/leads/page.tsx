@@ -1,13 +1,13 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState, TableSkeleton, PermissionGuard } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -18,15 +18,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockLeads, getStudentLeads, getInternLeads, getLeadsByType } from '@/lib/mock-data'
-import { mockLeadTypes, getLeadTypeById, STUDENT_TYPE_ID, INTERN_TYPE_ID } from '@/lib/mock-data/lead-types'
-import { mockUsers } from '@/lib/mock-data/users'
+import { getLeads, getLeadTypes } from '@/lib/api/leads'
+import { getEmployees } from '@/lib/api/employees'
 import { LEAD_STATUSES, LEAD_PRIORITIES } from '@/lib/constants'
 import { formatDate, getInitials, cn } from '@/lib/utils'
 import { canCreateLead, canEditLead, canDeleteLead, canViewAllLeads } from '@/lib/permissions'
+import { useToast } from '@/components/ui/toast'
+import type { Lead } from '@/lib/db/queries/leads'
+import type { LeadType } from '@/types/lead-type'
+import type { User } from '@/types/user'
 import { 
-  Users, Plus, Download, Search, Filter, Eye, Edit, Phone, Mail, 
-  GraduationCap, Briefcase, FileText, Building, UserPlus, Star 
+  Users, Plus, Eye, Edit, Phone, Mail, 
+  GraduationCap, Briefcase, FileText, Building, UserPlus, Star,
+  Loader2
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -42,16 +46,46 @@ const iconMap: Record<string, React.ElementType> = {
 
 export default function LeadsPage() {
   const { user } = useAuth()
+  const { toast } = useToast()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [leadTypes, setLeadTypes] = useState<LeadType[]>([])
+  const [employees, setEmployees] = useState<User[]>([])
 
-  const activeLeadTypes = useMemo(() => mockLeadTypes.filter(lt => lt.isActive), [])
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true)
+        const [leadsRes, typesRes, employeesRes] = await Promise.all([
+          getLeads(),
+          getLeadTypes(),
+          getEmployees(),
+        ])
+        setLeads(leadsRes.data)
+        setLeadTypes(typesRes.data)
+        setEmployees(employeesRes.data)
+      } catch (error) {
+        console.error('Failed to fetch data:', error)
+        toast({
+          title: 'Error',
+          description: 'Failed to load leads. Please try again.',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [toast])
+
+  const activeLeadTypes = useMemo(() => leadTypes.filter(lt => lt.isActive), [leadTypes])
 
   const filteredLeads = useMemo(() => {
-    return mockLeads.filter(lead => {
+    return leads.filter(lead => {
       const matchesSearch = lead.name.toLowerCase().includes(search.toLowerCase()) ||
         lead.email.toLowerCase().includes(search.toLowerCase()) ||
         lead.phone.includes(search)
@@ -60,12 +94,12 @@ export default function LeadsPage() {
       const matchesPriority = !priorityFilter || lead.priority === priorityFilter
       return matchesSearch && matchesType && matchesStatus && matchesPriority
     })
-  }, [search, typeFilter, statusFilter, priorityFilter])
+  }, [search, typeFilter, statusFilter, priorityFilter, leads])
 
-  const getAssignedUser = (userId: string | null) => userId ? mockUsers.find(u => u.id === userId) : undefined
+  const getAssignedUser = (userId: string | null | undefined) => userId ? employees.find(u => u.id === userId) : undefined
 
-  const getLeadTypeBadge = (typeId: string) => {
-    const leadType = getLeadTypeById(typeId)
+  const getLeadTypeBadge = (typeId: string | undefined) => {
+    const leadType = leadTypes.find(lt => lt.id === typeId)
     if (!leadType) return null
     const IconComponent = iconMap[leadType.icon] || FileText
     return (
@@ -81,13 +115,24 @@ export default function LeadsPage() {
 
   const getStatusOptions = () => {
     if (typeFilter) {
-      const leadType = getLeadTypeById(typeFilter)
+      const leadType = leadTypes.find(lt => lt.id === typeFilter)
       if (leadType) {
         return leadType.statuses.map(s => ({ value: s.value, label: s.label }))
       }
     }
     return LEAD_STATUSES
   }
+
+  const studentTypeId = leadTypes.find(lt => lt.code === 'student')?.id
+  const internTypeId = leadTypes.find(lt => lt.code === 'intern')?.id
+
+  const stats = useMemo(() => {
+    return {
+      total: leads.length,
+      students: studentTypeId ? leads.filter(l => l.typeId === studentTypeId).length : 0,
+      interns: internTypeId ? leads.filter(l => l.typeId === internTypeId).length : 0,
+    }
+  }, [leads, studentTypeId, internTypeId])
 
   if (!user) return null
 
@@ -104,16 +149,6 @@ export default function LeadsPage() {
     { value: '', label: 'All Priorities' },
     ...LEAD_PRIORITIES.map(p => ({ value: p.value, label: p.label }))
   ]
-
-  const stats = useMemo(() => {
-    const studentLeads = mockLeads.filter(l => l.typeId === STUDENT_TYPE_ID)
-    const internLeads = mockLeads.filter(l => l.typeId === INTERN_TYPE_ID)
-    return {
-      total: mockLeads.length,
-      students: studentLeads.length,
-      interns: internLeads.length,
-    }
-  }, [])
 
   return (
     <PermissionGuard check={canViewAllLeads} fallbackMessage="Only administrators and managers can view all leads.">
@@ -148,8 +183,8 @@ export default function LeadsPage() {
           </CardContent>
         </Card>
         <Card 
-          className={cn("cursor-pointer hover:border-primary/50 transition-colors", typeFilter === STUDENT_TYPE_ID && "border-primary")}
-          onClick={() => setTypeFilter(typeFilter === STUDENT_TYPE_ID ? '' : STUDENT_TYPE_ID)}
+          className={cn("cursor-pointer hover:border-primary/50 transition-colors", studentTypeId && typeFilter === studentTypeId && "border-primary")}
+          onClick={() => studentTypeId && setTypeFilter(typeFilter === studentTypeId ? '' : studentTypeId)}
         >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -164,8 +199,8 @@ export default function LeadsPage() {
           </CardContent>
         </Card>
         <Card 
-          className={cn("cursor-pointer hover:border-primary/50 transition-colors", typeFilter === INTERN_TYPE_ID && "border-primary")}
-          onClick={() => setTypeFilter(typeFilter === INTERN_TYPE_ID ? '' : INTERN_TYPE_ID)}
+          className={cn("cursor-pointer hover:border-primary/50 transition-colors", internTypeId && typeFilter === internTypeId && "border-primary")}
+          onClick={() => internTypeId && setTypeFilter(typeFilter === internTypeId ? '' : internTypeId)}
         >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -184,7 +219,9 @@ export default function LeadsPage() {
       <Card>
         <CardContent className="p-0">
           {loading ? (
-            <TableSkeleton rows={10} />
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
           ) : filteredLeads.length === 0 ? (
             <EmptyState
               icon={Users}
@@ -211,7 +248,7 @@ export default function LeadsPage() {
                 <TableBody>
                   {filteredLeads.map((lead) => {
                     const assignedUser = getAssignedUser(lead.assignedTo)
-                    const leadType = getLeadTypeById(lead.typeId)
+                    const leadType = leadTypes.find(lt => lt.id === lead.typeId)
                     const status = leadType?.statuses.find(s => s.value === lead.typeStatus)
                     return (
                       <TableRow key={lead.id}>
@@ -220,8 +257,12 @@ export default function LeadsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="font-medium">{lead.name}</div>
-                          {lead.typeId === INTERN_TYPE_ID && lead.customFields?.if_college && (
-                            <div className="text-xs text-muted-foreground">{lead.customFields.if_college as string}</div>
+                          {lead.typeId === internTypeId &&
+                            lead.customFields?.if_college != null &&
+                            String(lead.customFields.if_college).length > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {String(lead.customFields.if_college)}
+                            </div>
                           )}
                         </TableCell>
                         <TableCell>
@@ -245,7 +286,7 @@ export default function LeadsPage() {
                               color: status?.color
                             }}
                           >
-                            {status?.label || lead.typeStatus}
+                            {status?.label || lead.typeStatus || lead.status}
                           </Badge>
                         </TableCell>
                         <TableCell>

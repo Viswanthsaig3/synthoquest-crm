@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -10,16 +10,18 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { StatusBadge, StatsCard, EmptyState } from '@/components/shared'
-import { mockUsers, getUserById } from '@/lib/mock-data'
-import { mockLeads, getLeadsByAssignee } from '@/lib/mock-data'
-import { mockTasks, getTasksByAssignee } from '@/lib/mock-data'
-import { mockAttendance, getAttendanceByEmployee, getAttendanceSummary } from '@/lib/mock-data'
-import { mockTimesheets, getTimesheetsByEmployee, getEmployeeTimesheetSummary } from '@/lib/mock-data'
-import { mockLeaves, getLeavesByEmployee, getLeaveBalance } from '@/lib/mock-data'
-import { mockPayroll, getPayrollByEmployee } from '@/lib/mock-data'
-import { formatDate, getInitials, formatCurrency, formatTime } from '@/lib/utils'
+import { formatDate, getInitials, formatCurrency, formatTime, getErrorMessage } from '@/lib/utils'
 import { useAuth } from '@/context/auth-context'
-import { canManageEmployees } from '@/lib/permissions'
+import { canManageAssignedEmployees, canManageEmployees } from '@/lib/permissions'
+import { getEmployeeById } from '@/lib/api/employees'
+import { getTasks } from '@/lib/api/tasks'
+import { getTimesheets } from '@/lib/api/timesheets'
+import { canViewEmployeeAttendanceHistory } from '@/lib/client-permissions'
+import { getAccessToken } from '@/lib/api/client'
+import type { User as UserType } from '@/types/user'
+import type { Task } from '@/lib/db/queries/tasks'
+import type { Timesheet } from '@/types/timesheet'
+import type { AttendanceRecord } from '@/types/time-entry'
 import { 
   ArrowLeft, 
   Edit, 
@@ -29,14 +31,11 @@ import {
   Building,
   CheckCircle,
   Clock,
-  FileText,
-  DollarSign,
-  User,
+  User as UserIcon,
   ClipboardList,
-  CalendarDays,
   IndianRupee,
-  Download,
-  Eye
+  Eye,
+  Loader2
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -54,18 +53,104 @@ export default function EmployeeProfilePage() {
   const router = useRouter()
   const { user: currentUser } = useAuth()
   const employeeId = params.id as string
-  const employee = getUserById(employeeId)
   const initialTab = searchParams.get('tab') || 'profile'
 
+  const [loading, setLoading] = useState(true)
+  const [employee, setEmployee] = useState<UserType | null>(null)
+  const [assignedTasks, setAssignedTasks] = useState<Task[]>([])
+  const [employeeTimesheets, setEmployeeTimesheets] = useState<Timesheet[]>([])
   const [activeTab, setActiveTab] = useState(initialTab)
+  const [error, setError] = useState<string | null>(null)
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([])
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
 
-  if (!employee) {
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true)
+        const [employeeRes, tasksRes, timesheetsRes] = await Promise.all([
+          getEmployeeById(employeeId),
+          getTasks({ assignedTo: employeeId, limit: 100 }),
+          getTimesheets({ employeeId, limit: 50 }),
+        ])
+        
+        setEmployee(employeeRes.data)
+        setAssignedTasks(tasksRes.data)
+        setEmployeeTimesheets(timesheetsRes.data)
+      } catch (err: unknown) {
+        setError(getErrorMessage(err, 'Failed to load employee data'))
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [employeeId])
+
+  useEffect(() => {
+    if (!employee || !currentUser) return
+    if (!canViewEmployeeAttendanceHistory(currentUser, employee)) return
+
+    const run = async () => {
+      try {
+        setAttendanceLoading(true)
+        const from = new Date()
+        from.setDate(from.getDate() - 89)
+        const fromDate = from.toISOString().split('T')[0]
+        const toDate = new Date().toISOString().split('T')[0]
+        const token = getAccessToken()
+        const res = await fetch(
+          `/api/attendance/history?userId=${encodeURIComponent(employee.id)}&fromDate=${fromDate}&toDate=${toDate}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error)
+        setAttendanceRecords(json.data || [])
+      } catch {
+        setAttendanceRecords([])
+      } finally {
+        setAttendanceLoading(false)
+      }
+    }
+
+    void run()
+  }, [employee, currentUser])
+
+  useEffect(() => {
+    if (!employee || !currentUser) return
+    const showAttendance =
+      canViewEmployeeAttendanceHistory(currentUser, employee)
+    const legacyTab = activeTab === 'leaves' || activeTab === 'payroll'
+    const attendanceDenied = activeTab === 'attendance' && !showAttendance
+    if (legacyTab || attendanceDenied) {
+      setActiveTab('profile')
+      const url = new URL(window.location.href)
+      url.searchParams.set('tab', 'profile')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [employee, currentUser, activeTab])
+
+  if (loading) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Employee not found</p>
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+            <p className="text-muted-foreground mt-4">Loading employee data...</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (error || !employee) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted-foreground">{error || 'Employee not found'}</p>
             <Link href="/employees">
               <Button className="mt-4">Back to Employees</Button>
             </Link>
@@ -75,16 +160,19 @@ export default function EmployeeProfilePage() {
     )
   }
 
-  const canManage = currentUser && canManageEmployees(currentUser)
-  const assignedLeads = getLeadsByAssignee(employeeId)
-  const assignedTasks = getTasksByAssignee(employeeId)
-  const attendanceSummary = getAttendanceSummary(employeeId)
-  const timesheetSummary = getEmployeeTimesheetSummary(employeeId)
-  const leaveBalance = getLeaveBalance(employeeId)
-  const employeeLeaves = getLeavesByEmployee(employeeId)
-  const employeePayroll = getPayrollByEmployee(employeeId)
-  const employeeAttendance = getAttendanceByEmployee(employeeId)
-  const employeeTimesheets = getTimesheetsByEmployee(employeeId)
+  const canManage =
+    currentUser &&
+    (canManageEmployees(currentUser) ||
+      (canManageAssignedEmployees(currentUser) && employee.managedBy === currentUser.id))
+
+  const showAttendanceTab =
+    !!currentUser && canViewEmployeeAttendanceHistory(currentUser, employee)
+  const daysWithCheckIn90d = new Set(
+    attendanceRecords.filter((r) => r.checkInTime).map((r) => r.date)
+  ).size
+
+  const totalTimesheetHours = employeeTimesheets.reduce((sum, ts) => sum + (ts.totalHours || 0), 0)
+  const timesheetDayCount = employeeTimesheets.length
 
   const handleTabChange = (value: string) => {
     setActiveTab(value)
@@ -112,7 +200,13 @@ export default function EmployeeProfilePage() {
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold">{employee.name}</h1>
-                <StatusBadge status={employee.status} />
+                <Badge className={
+                  employee.status === 'active' ? 'bg-green-100 text-green-800' :
+                  employee.status === 'inactive' ? 'bg-gray-100 text-gray-800' :
+                  'bg-red-100 text-red-800'
+                }>
+                  {employee.status}
+                </Badge>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Badge variant="outline" className="capitalize">{employee.department}</Badge>
@@ -124,7 +218,7 @@ export default function EmployeeProfilePage() {
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
-            <Link href={`/employees/${employee.id}?edit=true`}>
+            <Link href={`/employees/${employee.id}/edit`}>
               <Button variant="outline">
                 <Edit className="h-4 w-4 mr-2" />
                 Edit
@@ -136,54 +230,59 @@ export default function EmployeeProfilePage() {
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <StatsCard
-          title="Assigned Leads"
-          value={assignedLeads.length}
-          icon={User}
-        />
-        <StatsCard
-          title="Active Tasks"
-          value={assignedTasks.filter(t => t.status !== 'done').length}
+          title="Assigned Tasks"
+          value={assignedTasks.filter(t => t.status !== 'completed' && t.status !== 'cancelled').length}
           icon={ClipboardList}
         />
         <StatsCard
-          title="Attendance Rate"
-          value={`${Math.round((attendanceSummary.present / attendanceSummary.totalDays) * 100)}%`}
+          title="Completed Tasks"
+          value={assignedTasks.filter(t => t.status === 'completed').length}
+          icon={CheckCircle}
+        />
+        <StatsCard
+          title="Days with check-in"
+          value={String(daysWithCheckIn90d)}
+          description="Last 90 days"
           icon={Calendar}
         />
         <StatsCard
-          title="Hours This Month"
-          value={`${timesheetSummary.totalHours}h`}
+          title="Timesheet Hours"
+          value={`${totalTimesheetHours.toFixed(1)}h`}
           icon={Clock}
         />
         <StatsCard
           title="Monthly Salary"
-          value={formatCurrency(employee.salary || 0)}
+          value={
+            employee.compensationType === 'unpaid'
+              ? 'Unpaid'
+              : formatCurrency(employee.compensationAmount ?? employee.salary ?? 0)
+          }
           icon={IndianRupee}
         />
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList
+          className={`grid w-full ${showAttendanceTab ? 'grid-cols-4' : 'grid-cols-3'}`}
+        >
           <TabsTrigger value="profile">
-            <User className="h-4 w-4 mr-2" />
+            <UserIcon className="h-4 w-4 mr-2" />
             Profile
           </TabsTrigger>
-          <TabsTrigger value="attendance">
-            <Calendar className="h-4 w-4 mr-2" />
-            Attendance
+          <TabsTrigger value="tasks">
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Tasks
           </TabsTrigger>
           <TabsTrigger value="timesheets">
             <Clock className="h-4 w-4 mr-2" />
             Timesheets
           </TabsTrigger>
-          <TabsTrigger value="leaves">
-            <CalendarDays className="h-4 w-4 mr-2" />
-            Leaves
-          </TabsTrigger>
-          <TabsTrigger value="payroll">
-            <IndianRupee className="h-4 w-4 mr-2" />
-            Payroll
-          </TabsTrigger>
+          {showAttendanceTab && (
+            <TabsTrigger value="attendance">
+              <Calendar className="h-4 w-4 mr-2" />
+              Attendance
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="profile" className="space-y-6">
@@ -204,7 +303,7 @@ export default function EmployeeProfilePage() {
                   <Phone className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <p className="text-sm text-muted-foreground">Phone</p>
-                    <p className="font-medium">{employee.phone}</p>
+                    <p className="font-medium">{employee.phone || 'Not provided'}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -232,14 +331,14 @@ export default function EmployeeProfilePage() {
                 <div className="space-y-4">
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-muted-foreground">Attendance Rate</span>
+                      <span className="text-sm text-muted-foreground">Check-in days (90d)</span>
                       <span className="text-sm font-medium">
-                        {Math.round((attendanceSummary.present / attendanceSummary.totalDays) * 100)}%
+                        {Math.min(100, Math.round((daysWithCheckIn90d / 90) * 100))}%
                       </span>
                     </div>
-                    <Progress 
-                      value={(attendanceSummary.present / attendanceSummary.totalDays) * 100} 
-                      className="h-2" 
+                    <Progress
+                      value={Math.min(100, (daysWithCheckIn90d / 90) * 100)}
+                      className="h-2"
                     />
                   </div>
                   <div>
@@ -247,29 +346,13 @@ export default function EmployeeProfilePage() {
                       <span className="text-sm text-muted-foreground">Task Completion</span>
                       <span className="text-sm font-medium">
                         {assignedTasks.length > 0 
-                          ? Math.round((assignedTasks.filter(t => t.status === 'done').length / assignedTasks.length) * 100)
+                          ? Math.round((assignedTasks.filter(t => t.status === 'completed').length / assignedTasks.length) * 100)
                           : 0}%
                       </span>
                     </div>
                     <Progress 
                       value={assignedTasks.length > 0 
-                        ? (assignedTasks.filter(t => t.status === 'done').length / assignedTasks.length) * 100
-                        : 0} 
-                      className="h-2" 
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-muted-foreground">Lead Conversion</span>
-                      <span className="text-sm font-medium">
-                        {assignedLeads.length > 0
-                          ? Math.round((assignedLeads.filter(l => l.status === 'converted').length / assignedLeads.length) * 100)
-                          : 0}%
-                      </span>
-                    </div>
-                    <Progress 
-                      value={assignedLeads.length > 0
-                        ? (assignedLeads.filter(l => l.status === 'converted').length / assignedLeads.length) * 100
+                        ? (assignedTasks.filter(t => t.status === 'completed').length / assignedTasks.length) * 100
                         : 0} 
                       className="h-2" 
                     />
@@ -278,7 +361,7 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="lg:col-span-2">
               <CardHeader>
                 <CardTitle>Recent Tasks</CardTitle>
               </CardHeader>
@@ -286,141 +369,114 @@ export default function EmployeeProfilePage() {
                 {assignedTasks.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No tasks assigned</p>
                 ) : (
-                  <div className="space-y-3">
-                    {assignedTasks.slice(0, 5).map(task => (
-                      <div key={task.id} className="flex items-center justify-between p-3 rounded-lg border">
-                        <div>
-                          <p className="font-medium">{task.title}</p>
-                          <p className="text-sm text-muted-foreground">Due: {formatDate(task.deadline)}</p>
-                        </div>
-                        <StatusBadge status={task.status} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Assigned Leads</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {assignedLeads.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No leads assigned</p>
-                ) : (
-                  <div className="space-y-3">
-                    {assignedLeads.slice(0, 5).map(lead => (
-                      <div key={lead.id} className="flex items-center justify-between p-3 rounded-lg border">
-                        <div>
-                          <p className="font-medium">{lead.name}</p>
-                          <p className="text-sm text-muted-foreground">{lead.courseInterested}</p>
-                        </div>
-                        <StatusBadge status={lead.status} />
-                      </div>
-                    ))}
-                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Priority</TableHead>
+                        <TableHead>Due Date</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {assignedTasks.slice(0, 5).map(task => (
+                        <TableRow key={task.id}>
+                          <TableCell className="font-medium">{task.title}</TableCell>
+                          <TableCell className="capitalize">{task.type}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={
+                              task.priority === 'urgent' ? 'border-red-500 text-red-700' :
+                              task.priority === 'high' ? 'border-orange-500 text-orange-700' :
+                              task.priority === 'medium' ? 'border-blue-500 text-blue-700' :
+                              'border-gray-500 text-gray-700'
+                            }>
+                              {task.priority}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{task.dueDate ? formatDate(new Date(task.dueDate)) : 'No due date'}</TableCell>
+                          <TableCell>
+                            <Badge className={
+                              task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                              task.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                              task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                              task.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                              'bg-yellow-100 text-yellow-800'
+                            }>
+                              {task.status.replace('_', ' ')}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        <TabsContent value="attendance" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Present Days</p>
-                    <p className="text-2xl font-bold text-green-600">{attendanceSummary.present}</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Absent Days</p>
-                    <p className="text-2xl font-bold text-red-600">{attendanceSummary.absent}</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                    <Calendar className="h-5 w-5 text-red-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Late Arrivals</p>
-                    <p className="text-2xl font-bold text-yellow-600">{attendanceSummary.late}</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-yellow-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Avg Hours</p>
-                    <p className="text-2xl font-bold">{attendanceSummary.averageHours.toFixed(1)}h</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-blue-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
+        <TabsContent value="tasks" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Attendance History</CardTitle>
-              <CardDescription>Last 30 days attendance records</CardDescription>
+              <CardTitle>All Assigned Tasks</CardTitle>
+              <CardDescription>{assignedTasks.length} tasks assigned to this employee</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              {employeeAttendance.length === 0 ? (
+              {assignedTasks.length === 0 ? (
                 <EmptyState
-                  icon={Calendar}
-                  title="No attendance records"
-                  description="Attendance records will appear here."
+                  icon={ClipboardList}
+                  title="No tasks assigned"
+                  description="Tasks assigned to this employee will appear here."
                 />
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Check In</TableHead>
-                      <TableHead>Check Out</TableHead>
-                      <TableHead>Hours</TableHead>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Priority</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Due Date</TableHead>
+                      <TableHead>Hours</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {employeeAttendance.slice(0, 20).map((record) => (
-                      <TableRow key={record.id}>
-                        <TableCell>{formatDate(record.date)}</TableCell>
-                        <TableCell>{record.checkIn ? formatTime(record.checkIn) : '-'}</TableCell>
-                        <TableCell>{record.checkOut ? formatTime(record.checkOut) : '-'}</TableCell>
-                        <TableCell>{record.hoursWorked}h</TableCell>
+                    {assignedTasks.map((task) => (
+                      <TableRow key={task.id}>
+                        <TableCell className="font-medium">{task.title}</TableCell>
+                        <TableCell className="capitalize">{task.type}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={
+                            task.priority === 'urgent' ? 'border-red-500 text-red-700' :
+                            task.priority === 'high' ? 'border-orange-500 text-orange-700' :
+                            task.priority === 'medium' ? 'border-blue-500 text-blue-700' :
+                            'border-gray-500 text-gray-700'
+                          }>
+                            {task.priority}
+                          </Badge>
+                        </TableCell>
                         <TableCell>
                           <Badge className={
-                            record.status === 'present' ? 'bg-green-100 text-green-800' :
-                            record.status === 'late' ? 'bg-yellow-100 text-yellow-800' :
-                            record.status === 'absent' ? 'bg-red-100 text-red-800' :
-                            'bg-purple-100 text-purple-800'
+                            task.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            task.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                            task.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                            task.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                            'bg-yellow-100 text-yellow-800'
                           }>
-                            {record.status.replace('_', ' ')}
+                            {task.status.replace('_', ' ')}
                           </Badge>
+                        </TableCell>
+                        <TableCell>{task.dueDate ? formatDate(new Date(task.dueDate)) : '-'}</TableCell>
+                        <TableCell>{task.actualHours || 0}h / {task.estimatedHours || 0}h</TableCell>
+                        <TableCell className="text-right">
+                          <Link href={`/tasks/${task.id}`}>
+                            <Button variant="ghost" size="sm">
+                              <Eye className="h-4 w-4 mr-1" />
+                              View
+                            </Button>
+                          </Link>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -432,13 +488,13 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         <TabsContent value="timesheets" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Total Hours</p>
-                    <p className="text-2xl font-bold">{timesheetSummary.totalHours}h</p>
+                    <p className="text-2xl font-bold">{totalTimesheetHours.toFixed(1)}h</p>
                   </div>
                   <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
                     <Clock className="h-5 w-5 text-blue-600" />
@@ -450,37 +506,11 @@ export default function EmployeeProfilePage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-muted-foreground">Pending</p>
-                    <p className="text-2xl font-bold text-yellow-600">{timesheetSummary.submitted}</p>
+                    <p className="text-sm text-muted-foreground">Days with logs</p>
+                    <p className="text-2xl font-bold">{timesheetDayCount}</p>
                   </div>
-                  <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-yellow-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Approved</p>
-                    <p className="text-2xl font-bold text-green-600">{timesheetSummary.approved}</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Rejected</p>
-                    <p className="text-2xl font-bold text-red-600">{timesheetSummary.rejected}</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-red-600" />
+                  <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
+                    <Clock className="h-5 w-5 text-muted-foreground" />
                   </div>
                 </div>
               </CardContent>
@@ -503,19 +533,21 @@ export default function EmployeeProfilePage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Date</TableHead>
-                      <TableHead>Hours</TableHead>
-                      <TableHead>Tasks</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Total Hours</TableHead>
+                      <TableHead>Regular</TableHead>
+                      <TableHead>Overtime</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {employeeTimesheets.map((ts) => (
                       <TableRow key={ts.id}>
-                        <TableCell>{formatDate(ts.date)}</TableCell>
-                        <TableCell>{ts.totalHours}h</TableCell>
-                        <TableCell>{ts.entries.length} tasks</TableCell>
-                        <TableCell><StatusBadge status={ts.status} /></TableCell>
+                        <TableCell>
+                          {formatDate(new Date(ts.workDate))}
+                        </TableCell>
+                        <TableCell>{ts.totalHours?.toFixed(1) || 0}h</TableCell>
+                        <TableCell>{ts.regularHours?.toFixed(1) || 0}h</TableCell>
+                        <TableCell>{ts.overtimeHours?.toFixed(1) || 0}h</TableCell>
                         <TableCell className="text-right">
                           <Link href={`/timesheets/${ts.id}`}>
                             <Button variant="ghost" size="sm">
@@ -533,174 +565,76 @@ export default function EmployeeProfilePage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="leaves" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {showAttendanceTab && (
+          <TabsContent value="attendance" className="space-y-6">
             <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Sick Leave</p>
-                    <p className="text-2xl font-bold">{leaveBalance.sick} days</p>
+              <CardHeader>
+                <CardTitle>Attendance history</CardTitle>
+                <CardDescription>
+                  Last 90 days — check-in/out times and geofence evaluation (office / home).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                {attendanceLoading ? (
+                  <div className="py-12 text-center">
+                    <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
                   </div>
-                  <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center">
-                    <CalendarDays className="h-5 w-5 text-red-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Casual Leave</p>
-                    <p className="text-2xl font-bold">{leaveBalance.casual} days</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                    <CalendarDays className="h-5 w-5 text-blue-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Paid Leave</p>
-                    <p className="text-2xl font-bold">{leaveBalance.paid} days</p>
-                  </div>
-                  <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                    <CalendarDays className="h-5 w-5 text-green-600" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Leave History</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {employeeLeaves.length === 0 ? (
-                <EmptyState
-                  icon={CalendarDays}
-                  title="No leave requests"
-                  description="Leave requests will appear here."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Type</TableHead>
-                      <TableHead>From</TableHead>
-                      <TableHead>To</TableHead>
-                      <TableHead>Days</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {employeeLeaves.map((leave) => (
-                      <TableRow key={leave.id}>
-                        <TableCell>
-                          <Badge variant="outline" className="capitalize">{leave.type}</Badge>
-                        </TableCell>
-                        <TableCell>{formatDate(leave.startDate)}</TableCell>
-                        <TableCell>{formatDate(leave.endDate)}</TableCell>
-                        <TableCell>{leave.days}</TableCell>
-                        <TableCell className="max-w-xs truncate">{leave.reason}</TableCell>
-                        <TableCell><StatusBadge status={leave.status} /></TableCell>
+                ) : attendanceRecords.length === 0 ? (
+                  <EmptyState
+                    icon={Calendar}
+                    title="No attendance rows"
+                    description="No records in this period."
+                  />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Check in</TableHead>
+                        <TableHead>Check out</TableHead>
+                        <TableHead>In radius (in)</TableHead>
+                        <TableHead>In radius (out)</TableHead>
+                        <TableHead>Distance in (m)</TableHead>
+                        <TableHead>Distance out (m)</TableHead>
+                        <TableHead>Late</TableHead>
+                        <TableHead>Hours</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="payroll" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Salary Structure</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-4 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">Basic Salary</p>
-                  <p className="text-xl font-bold">{formatCurrency(employee.salary * 0.67)}</p>
-                </div>
-                <div className="p-4 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">HRA</p>
-                  <p className="text-xl font-bold">{formatCurrency(employee.salary * 0.2)}</p>
-                </div>
-                <div className="p-4 rounded-lg bg-muted">
-                  <p className="text-xs text-muted-foreground">Allowances</p>
-                  <p className="text-xl font-bold">{formatCurrency(employee.salary * 0.13)}</p>
-                </div>
-                <div className="p-4 rounded-lg bg-green-50 border border-green-200">
-                  <p className="text-xs text-green-600">Gross Salary</p>
-                  <p className="text-xl font-bold text-green-700">{formatCurrency(employee.salary || 0)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Payslip History</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {employeePayroll.length === 0 ? (
-                <EmptyState
-                  icon={IndianRupee}
-                  title="No payroll records"
-                  description="Payroll records will appear here."
-                />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Month</TableHead>
-                      <TableHead>Gross</TableHead>
-                      <TableHead>Deductions</TableHead>
-                      <TableHead>Net</TableHead>
-                      <TableHead>Days Worked</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {employeePayroll.map((pay) => (
-                      <TableRow key={pay.id}>
-                        <TableCell>{pay.month} {pay.year}</TableCell>
-                        <TableCell>{formatCurrency(pay.salary.gross)}</TableCell>
-                        <TableCell className="text-red-600">-{formatCurrency(pay.salary.deductions)}</TableCell>
-                        <TableCell className="font-semibold text-green-600">{formatCurrency(pay.salary.net)}</TableCell>
-                        <TableCell>{pay.daysWorked}/{pay.daysInMonth}</TableCell>
-                        <TableCell><StatusBadge status={pay.status} /></TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Link href={`/payroll/${pay.id}`}>
-                              <Button variant="ghost" size="sm">
-                                <Eye className="h-4 w-4 mr-1" />
-                                View
-                              </Button>
-                            </Link>
-                            <Button variant="ghost" size="sm">
-                              <Download className="h-4 w-4 mr-1" />
-                              PDF
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+                    </TableHeader>
+                    <TableBody>
+                      {attendanceRecords.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>{formatDate(new Date(r.date))}</TableCell>
+                          <TableCell>
+                            {r.checkInTime ? formatTime(new Date(r.checkInTime)) : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {r.checkOutTime ? formatTime(new Date(r.checkOutTime)) : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {r.checkInInRadius === true ? 'Yes' : r.checkInInRadius === false ? 'No' : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {r.checkOutInRadius === true ? 'Yes' : r.checkOutInRadius === false ? 'No' : '—'}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {r.checkInDistanceMeters != null ? Math.round(r.checkInDistanceMeters) : '—'}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {r.checkOutDistanceMeters != null ? Math.round(r.checkOutDistanceMeters) : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {r.isLate ? `Yes (${r.lateByMinutes}m)` : 'No'}
+                          </TableCell>
+                          <TableCell>{r.totalHours?.toFixed(1) ?? '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

@@ -1,19 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
 import { verifyRefreshToken, generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt'
-import { getRefreshTokenByHash, createRefreshToken, revokeRefreshToken } from '@/lib/db/queries/refresh-tokens'
+import { getRefreshTokenByHash, getAnyTokenByHash, createRefreshToken, revokeRefreshToken, revokeTokenFamily } from '@/lib/db/queries/refresh-tokens'
+import { createAdminClient } from '@/lib/db/server-client'
 import { createHash } from 'crypto'
 
-const refreshSchema = z.object({
-  refreshToken: z.string().min(1, 'Refresh token is required'),
-})
-
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json()
-    const validated = refreshSchema.parse(body)
+  // SECURITY: CRIT-09 — CSRF protection: require custom header.
+  // Browsers prevent forms from setting custom headers, blocking
+  // cross-origin form-based CSRF attacks on this cookie-based endpoint.
+  const xRequestedWith = request.headers.get('x-requested-with')
+  if (xRequestedWith !== 'XMLHttpRequest') {
+    return NextResponse.json(
+      { error: 'Forbidden: missing CSRF header', code: 'CSRF_PROTECTION' },
+      { status: 403 }
+    )
+  }
 
-    const payload = await verifyRefreshToken(validated.refreshToken)
+  try {
+    const refreshTokenString = request.cookies.get('refreshToken')?.value?.trim() ?? ''
+
+    if (!refreshTokenString) {
+      return NextResponse.json(
+        { error: 'Refresh token required', code: 'MISSING_TOKEN' },
+        { status: 401 }
+      )
+    }
+
+    const payload = await verifyRefreshToken(refreshTokenString)
 
     if (!payload) {
       return NextResponse.json(
@@ -23,24 +36,61 @@ export async function POST(request: NextRequest) {
     }
 
     const tokenHash = createHash('sha256')
-      .update(validated.refreshToken)
+      .update(refreshTokenString)
       .digest('hex')
 
     const existingToken = await getRefreshTokenByHash(tokenHash)
 
     if (!existingToken) {
+      // SECURITY: HIGH-04 — Token reuse detection.
+      // The token is valid (JWT signature OK) but not in DB as active.
+      // Check if it's a REVOKED token — this means an attacker is replaying it.
+      const revokedToken = await getAnyTokenByHash(tokenHash)
+      
+      if (revokedToken && revokedToken.revokedAt && revokedToken.familyId) {
+        // CRITICAL: Token was already used and revoked, but someone is replaying it.
+        // This indicates the token family is compromised. Kill the entire family.
+        console.error(
+          `SECURITY ALERT: Refresh token reuse detected for user ${revokedToken.userId}. ` +
+          `Family ${revokedToken.familyId} compromised. Revoking all tokens in family.`
+        )
+        await revokeTokenFamily(revokedToken.familyId)
+      }
+
       return NextResponse.json(
         { error: 'Token has been revoked or expired', code: 'TOKEN_REVOKED' },
         { status: 401 }
       )
     }
 
+    // Revoke the current token (standard rotation)
     await revokeRefreshToken(existingToken.id)
+
+    // SECURITY: MED-07 fix — Fetch current user from DB for fresh email/role
+    // instead of using stale payload data
+    const supabase = await createAdminClient()
+    const { data: currentUser } = await supabase
+      .from('users')
+      .select('email, role, status')
+      .eq('id', payload.userId)
+      .is('deleted_at', null)
+      .single()
+
+    if (!currentUser || currentUser.status !== 'active') {
+      // User was deactivated since token was issued — kill the family
+      if (existingToken.familyId) {
+        await revokeTokenFamily(existingToken.familyId)
+      }
+      return NextResponse.json(
+        { error: 'Account is not active', code: 'ACCOUNT_INACTIVE' },
+        { status: 403 }
+      )
+    }
 
     const newAccessToken = await generateAccessToken({
       userId: payload.userId,
-      email: payload.email || 'user@example.com',
-      role: payload.role || 'employee',
+      email: currentUser.email,   // Fresh from DB
+      role: currentUser.role,     // Fresh from DB
     })
 
     const newTokenId = createHash('sha256')
@@ -58,16 +108,17 @@ export async function POST(request: NextRequest) {
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
+    // SECURITY: HIGH-04 — Preserve family_id during rotation
     await createRefreshToken({
       userId: payload.userId,
       tokenHash: newRefreshTokenHash,
       expiresAt,
+      familyId: existingToken.familyId || undefined,
     })
 
     const response = NextResponse.json({
       data: {
         accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
       },
     })
 
@@ -81,13 +132,6 @@ export async function POST(request: NextRequest) {
 
     return response
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
-        { status: 400 }
-      )
-    }
-
     console.error('Refresh error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },

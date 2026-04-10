@@ -8,7 +8,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { CallRecord, CallOutcome, Lead } from '@/types/lead'
+import type { CallRecord, Lead } from '@/lib/db/queries/leads'
+import type { CallOutcome } from '@/types/lead'
 import { CALL_OUTCOMES } from '@/lib/constants'
 import { voipService, formatDuration } from '@/lib/voip-service'
 import { Phone, PhoneOff, Mic, MicOff, Volume2, X, CheckCircle, Clock, Calendar } from 'lucide-react'
@@ -93,14 +94,14 @@ export function CallModal({ lead, callerId, callerName, onClose, onComplete }: C
       calledBy: callerId,
       calledByName: callerName,
       phoneNumber: lead.phone,
-      startedAt: new Date(Date.now() - duration * 1000),
-      endedAt: new Date(),
+      startedAt: new Date(Date.now() - duration * 1000).toISOString(),
+      endedAt: new Date().toISOString(),
       duration,
       outcome,
-      recordingUrl: outcome === 'answered' ? `/recordings/mock-${Date.now()}.mp3` : null,
+      recordingUrl: outcome === 'answered' ? `/recordings/mock-${Date.now()}.mp3` : undefined,
       remarks,
       followUpRequired,
-      followUpDate: followUpRequired && followUpDate ? new Date(followUpDate) : null,
+      followUpDate: followUpRequired && followUpDate ? followUpDate : undefined,
     }
 
     onComplete(callRecord)

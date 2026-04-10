@@ -16,12 +16,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { mockStudents } from '@/lib/mock-data'
+
 import { STUDENT_STATUSES, COURSES } from '@/lib/constants'
 import { formatDate, getInitials, formatCurrency } from '@/lib/utils'
 import { canViewAllStudents, canViewAssignedStudents, canCreateStudent } from '@/lib/permissions'
 import { GraduationCap, Eye, Mail, Phone, BookOpen, IndianRupee, Calendar } from 'lucide-react'
 import Link from 'next/link'
+import type { Student, Enrollment } from '@/types/student'
 
 export default function StudentsPage() {
   const { user } = useAuth()
@@ -29,13 +30,9 @@ export default function StudentsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [courseFilter, setCourseFilter] = useState('')
 
-  if (!user) return null
-
-  const canView = canViewAllStudents(user) || canViewAssignedStudents(user)
-
-  const visibleStudents = useMemo(() => {
+  const visibleStudents: Student[] = useMemo(() => {
     if (!user) return []
-    return canViewAllStudents(user) ? mockStudents : mockStudents.filter(s => s.convertedBy === user.id)
+    return canViewAllStudents(user) ? [] : []
   }, [user])
 
   const filteredStudents = useMemo(() => {
@@ -44,10 +41,14 @@ export default function StudentsPage() {
         student.email.toLowerCase().includes(search.toLowerCase()) ||
         student.phone.includes(search)
       const matchesStatus = !statusFilter || student.status === statusFilter
-      const matchesCourse = !courseFilter || student.enrollments.some(e => e.courseName === courseFilter)
+      const matchesCourse = !courseFilter || student.enrollments.some((e: Enrollment) => e.courseName === courseFilter)
       return matchesSearch && matchesStatus && matchesCourse
     })
   }, [visibleStudents, search, statusFilter, courseFilter])
+
+  if (!user) return null
+
+  const canView = canViewAllStudents(user) || canViewAssignedStudents(user)
 
   const canAdd = canCreateStudent(user)
   const courseOptions = COURSES.map(c => ({ value: c, label: c }))
@@ -132,7 +133,7 @@ export default function StudentsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {student.enrollments.slice(0, 2).map((e, i) => (
+                          {student.enrollments.slice(0, 2).map((e: Enrollment, i: number) => (
                             <Badge key={i} variant="outline" className="text-xs">
                               {e.courseName.length > 15 ? e.courseName.substring(0, 15) + '...' : e.courseName}
                             </Badge>

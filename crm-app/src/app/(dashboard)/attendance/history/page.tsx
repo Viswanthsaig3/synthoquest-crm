@@ -1,118 +1,144 @@
 'use client'
 
-import React, { useState } from 'react'
-import { useAuth } from '@/context/auth-context'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
-import { PageHeader, StatusBadge } from '@/components/shared'
-import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/shared'
+import { AttendanceSubNav } from '@/components/attendance/attendance-subnav'
+import { useAuth } from '@/context/auth-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Select } from '@/components/ui/select'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { mockAttendance, getAttendanceByEmployee, getAttendanceSummary } from '@/lib/mock-data'
-import { mockUsers } from '@/lib/mock-data/users'
-import { formatDate, getInitials } from '@/lib/utils'
-import { canViewTeamAttendance, getManagedUsers } from '@/lib/permissions'
-import { Calendar, ChevronLeft, ChevronRight, Download, Users } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import type { AttendanceRecord } from '@/types/time-entry'
+import { getAccessToken } from '@/lib/api/client'
 
 const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ]
 
 export default function AttendanceHistoryPage() {
   const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth())
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear())
-  const [selectedEmployee, setSelectedEmployee] = useState<string>('')
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([])
 
-  if (!user) return null
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        const startOfMonth = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0]
+        const endOfMonth = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0]
+        const token = getAccessToken()
 
-  const showTeamView = canViewTeamAttendance(user)
-  const managedUsers = getManagedUsers(user, mockUsers)
-  const viewEmployeeId = selectedEmployee || user.id
-  const viewEmployee = mockUsers.find(u => u.id === viewEmployeeId) || user
+        const selfId = user?.id
+        const q = new URLSearchParams({
+          fromDate: startOfMonth,
+          toDate: endOfMonth,
+        })
+        if (selfId) q.set('userId', selfId)
+        const attRes = await fetch(`/api/attendance/history?${q.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const attData = await attRes.json()
+        setAttendance(attData.data || [])
+      } catch (error) {
+        console.error('Error fetching history:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
 
-  const attendanceRecords = getAttendanceByEmployee(viewEmployeeId)
-
-  const getDaysInMonth = (month: number, year: number) => {
-    return new Date(year, month + 1, 0).getDate()
-  }
-
-  const getFirstDayOfMonth = (month: number, year: number) => {
-    return new Date(year, month, 1).getDay()
-  }
-
-  const daysInMonth = getDaysInMonth(currentMonth, currentYear)
-  const firstDay = getFirstDayOfMonth(currentMonth, currentYear)
-
-  const getAttendanceForDay = (day: number) => {
-    const date = new Date(currentYear, currentMonth, day)
-    return attendanceRecords.find(a => a.date.toDateString() === date.toDateString())
-  }
+    fetchData()
+  }, [currentMonth, currentYear, user?.id])
 
   const navigateMonth = (direction: 'prev' | 'next') => {
     if (direction === 'prev') {
       if (currentMonth === 0) {
         setCurrentMonth(11)
-        setCurrentYear(currentYear - 1)
+        setCurrentYear((year) => year - 1)
       } else {
-        setCurrentMonth(currentMonth - 1)
+        setCurrentMonth((month) => month - 1)
       }
+    } else if (currentMonth === 11) {
+      setCurrentMonth(0)
+      setCurrentYear((year) => year + 1)
     } else {
-      if (currentMonth === 11) {
-        setCurrentMonth(0)
-        setCurrentYear(currentYear + 1)
-      } else {
-        setCurrentMonth(currentMonth + 1)
-      }
+      setCurrentMonth((month) => month + 1)
     }
   }
 
-  const presentDays = attendanceRecords.filter(a => a.status === 'present').length
-  const absentDays = attendanceRecords.filter(a => a.status === 'absent').length
-  const lateDays = attendanceRecords.filter(a => a.status === 'late').length
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate()
+  const firstDay = new Date(currentYear, currentMonth, 1).getDay()
+  const getAttendanceForDay = (day: number): { totalHours: number; status: string; geoWarning: boolean } | undefined => {
+    const dateStr = `${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`
+    const dayRows = attendance.filter((record) => record.date === dateStr)
+    if (dayRows.length === 0) return undefined
+    const totalHours = dayRows.reduce((sum, a) => sum + (a.totalHours || 0), 0)
+    const status =
+      dayRows.some((a) => a.status === 'late') ? 'late' : dayRows.some((a) => a.status === 'present') ? 'present' : 'absent'
+    const geoWarning = dayRows.some(
+      (a) => a.checkInInRadius === false || a.checkOutInRadius === false
+    )
+    return { totalHours, status, geoWarning }
+  }
+
+  const monthlyStats = useMemo(() => {
+    const byDate = new Map<string, AttendanceRecord[]>()
+    for (const a of attendance) {
+      const list = byDate.get(a.date) ?? []
+      list.push(a)
+      byDate.set(a.date, list)
+    }
+    let presentDays = 0
+    let lateDays = 0
+    let totalHours = 0
+    for (const [, list] of Array.from(byDate.entries())) {
+      const dayHours = list.reduce((s, r) => s + (r.totalHours || 0), 0)
+      totalHours += dayHours
+      if (list.some((r) => r.status === 'present' || r.status === 'late')) presentDays++
+      if (list.some((r) => r.status === 'late')) lateDays++
+    }
+    return { presentDays, lateDays, totalHours }
+  }, [attendance])
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
       <Breadcrumb />
-      
-      <PageHeader
-        title="Attendance History"
-        description={showTeamView ? "View attendance records for you and your team" : "View your attendance records"}
-        exportData
-      />
+      <PageHeader title="Attendance History" description="Monthly calendar view of your attendance." />
 
-      {showTeamView && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Team Members
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Select
-              value={selectedEmployee}
-              onChange={(e) => setSelectedEmployee(e.target.value)}
-            >
-              <option value="">My Attendance</option>
-              {managedUsers.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.name}</option>
-              ))}
-            </Select>
-          </CardContent>
-        </Card>
-      )}
+      <AttendanceSubNav />
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card className="lg:col-span-3">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
+              <CardTitle>
                 {MONTHS[currentMonth]} {currentYear}
-                {selectedEmployee && <span className="text-muted-foreground">- {viewEmployee.name}</span>}
               </CardTitle>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="icon" onClick={() => navigateMonth('prev')}>
@@ -126,44 +152,45 @@ export default function AttendanceHistoryPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-7 gap-1 mb-2">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
                 <div key={day} className="p-2 text-center text-sm font-medium text-muted-foreground">
                   {day}
                 </div>
               ))}
             </div>
+
             <div className="grid grid-cols-7 gap-1">
               {Array.from({ length: firstDay }).map((_, i) => (
-                <div key={`empty-${i}`} className="p-2 h-20"></div>
+                <div key={`empty-${i}`} className="p-2 h-24" />
               ))}
+
               {Array.from({ length: daysInMonth }).map((_, i) => {
                 const day = i + 1
-                const attendance = getAttendanceForDay(day)
-                const isWeekend = (firstDay + i) % 7 === 0 || (firstDay + i) % 7 === 6
+                const att = getAttendanceForDay(day)
+                const dayOfWeek = (firstDay + i) % 7
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
 
                 return (
-                  <div
-                    key={day}
-                    className={`p-2 h-20 border rounded-lg ${
-                      isWeekend ? 'bg-muted/30' : 'bg-card'
-                    }`}
-                  >
+                  <div key={day} className={`p-2 h-24 border rounded-lg ${isWeekend ? 'bg-muted/30' : 'bg-card'}`}>
                     <div className="text-sm font-medium">{day}</div>
-                    {attendance && !isWeekend && (
+                    {att && !isWeekend && (
                       <div className="mt-1">
                         <Badge
-                          variant="outline"
-                          className={`text-xs ${
-                            attendance.status === 'present' ? 'border-green-500 text-green-700' :
-                            attendance.status === 'absent' ? 'border-red-500 text-red-700' :
-                            attendance.status === 'late' ? 'border-yellow-500 text-yellow-700' :
-                            'border-orange-500 text-orange-700'
-                          }`}
+                          className={
+                            att.status === 'present'
+                              ? 'bg-green-100 text-green-800 text-xs'
+                              : att.status === 'late'
+                              ? 'bg-yellow-100 text-yellow-800 text-xs'
+                              : 'bg-gray-100 text-gray-800 text-xs'
+                          }
                         >
-                          {attendance.status === 'present' ? 'P' : 
-                           attendance.status === 'absent' ? 'A' : 
-                           attendance.status === 'late' ? 'L' : 'H'}
+                          {att.totalHours.toFixed(1)}h
                         </Badge>
+                        {att.geoWarning && (
+                          <Badge variant="destructive" className="mt-1 text-[10px]">
+                            Geo warning
+                          </Badge>
+                        )}
                       </div>
                     )}
                   </div>
@@ -173,55 +200,25 @@ export default function AttendanceHistoryPage() {
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Legend</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Badge className="bg-green-500">P</Badge>
-                <span className="text-sm">Present</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className="bg-red-500">A</Badge>
-                <span className="text-sm">Absent</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className="bg-yellow-500">L</Badge>
-                <span className="text-sm">Late</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className="bg-orange-500">H</Badge>
-                <span className="text-sm">Half Day</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className="bg-gray-300">W</Badge>
-                <span className="text-sm">Weekend</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Monthly Stats</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Present</span>
-                <Badge className="bg-green-500">{presentDays}</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Absent</span>
-                <Badge className="bg-red-500">{absentDays}</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Late</span>
-                <Badge className="bg-yellow-500">{lateDays}</Badge>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Monthly Stats</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Present Days</span>
+              <Badge className="bg-green-500">{monthlyStats.presentDays}</Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Late Days</span>
+              <Badge className="bg-yellow-500">{monthlyStats.lateDays}</Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Attendance Hours</span>
+              <Badge>{monthlyStats.totalHours.toFixed(1)}h</Badge>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
