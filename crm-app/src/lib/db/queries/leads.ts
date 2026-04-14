@@ -304,7 +304,7 @@ export async function updateLead(id: string, data: Partial<{
 export async function claimLead(id: string, userId: string): Promise<Lead> {
   const supabase = await createAdminClient()
   
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('leads')
     .update({
       assigned_to: userId,
@@ -312,12 +312,20 @@ export async function claimLead(id: string, userId: string): Promise<Lead> {
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
+    .is('assigned_to', null)
+    .select()
+    .single()
 
-  if (error) throw error
+  if (error) {
+    if (error.code === 'PGRST116') {
+      throw new Error('Lead already claimed or not found')
+    }
+    throw error
+  }
 
   await createActivity(id, userId, 'claimed', 'Lead claimed')
 
-  return getLeadById(id) as Promise<Lead>
+  return data as Lead
 }
 
 export async function deleteLead(id: string): Promise<void> {

@@ -16,12 +16,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getEmployees } from '@/lib/api/employees'
+import { getEmployees, deleteEmployee } from '@/lib/api/employees'
 import { getRoles } from '@/lib/api/roles'
 import { getDepartments } from '@/lib/api/departments'
 import { formatDate, getInitials, getErrorMessage } from '@/lib/utils'
 import { canViewEmployees, canManageEmployees, canManageAssignedEmployees } from '@/lib/permissions'
-import { Users, Eye, Edit, Mail, Phone, Calendar, Loader2 } from 'lucide-react'
+import { Users, Eye, Edit, Mail, Phone, Calendar, Loader2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useToast } from '@/components/ui/toast'
 import type { User } from '@/types/user'
@@ -100,10 +100,22 @@ export default function EmployeesPage() {
     }
   }
 
+  const handleDeleteEmployee = async (employeeId: string, employeeName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${employeeName}"? This action cannot be undone.`)) return
+    try {
+      await deleteEmployee(employeeId)
+      toast({ title: 'Success', description: 'Employee deleted successfully' })
+      fetchEmployees()
+    } catch (error: unknown) {
+      toast({ title: 'Error', description: getErrorMessage(error, 'Failed to delete employee'), variant: 'destructive' })
+    }
+  }
+
   if (!user) return null
 
   const canAdd = canManageEmployees(user)
   const canManageAssigned = canManageAssignedEmployees(user)
+  const canDelete = canManageEmployees(user)
 
   return (
     <PermissionGuard check={canViewEmployees} fallbackMessage="You don't have permission to view employees.">
@@ -193,20 +205,25 @@ export default function EmployeesPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Link href={`/employees/${employee.id}`}>
-                            <Button variant="ghost" size="icon">
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </Link>
-                          {(canAdd || (canManageAssigned && employee.managedBy === user.id)) && (
-                            <Link href={`/employees/${employee.id}/edit`}>
-                              <Button variant="ghost" size="icon">
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                            </Link>
-                          )}
-                        </div>
+<div className="flex items-center justify-end gap-2">
+                           <Link href={`/employees/${employee.id}`}>
+                             <Button variant="ghost" size="icon">
+                               <Eye className="h-4 w-4" />
+                             </Button>
+                           </Link>
+                           {(canAdd || (canManageAssigned && employee.managedBy === user.id)) && (
+                             <Link href={`/employees/${employee.id}/edit`}>
+                               <Button variant="ghost" size="icon">
+                                 <Edit className="h-4 w-4" />
+                               </Button>
+                             </Link>
+                           )}
+                           {canDelete && employee.id !== user.id && (
+                             <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDeleteEmployee(employee.id, employee.name)}>
+                               <Trash2 className="h-4 w-4" />
+                             </Button>
+                           )}
+                         </div>
                       </TableCell>
                     </TableRow>
                   ))}

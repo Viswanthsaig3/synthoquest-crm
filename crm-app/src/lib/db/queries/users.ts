@@ -245,6 +245,25 @@ export async function updateUserPassword(id: string, passwordHash: string): Prom
   if (error) throw error
 }
 
+export async function updateUserEmail(id: string, email: string): Promise<void> {
+  const supabase = await createAdminClient()
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      email: email,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('Email already in use')
+    }
+    throw error
+  }
+}
+
 export async function updateLastLogin(id: string): Promise<void> {
   const supabase = await createAdminClient()
 

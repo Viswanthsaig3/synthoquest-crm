@@ -1,4 +1,23 @@
 import type { User } from '@/types/user'
+import {
+  canViewTeamAttendance as canViewTeamAttendanceBase,
+  canAdjustAttendanceRecords as canAdjustAttendanceRecordsBase,
+  canViewAttendanceAdjustments as canViewAttendanceAdjustmentsBase,
+  canDeleteStudent as canDeleteStudentBase,
+  canDeleteIntern as canDeleteInternBase,
+  canDeleteBatch as canDeleteBatchBase,
+  canViewAllLeaves as canViewAllLeavesBase,
+  canManageLeaveBalances as canManageLeaveBalancesBase,
+  canEditAllLeaves as canEditAllLeavesBase,
+  canDeleteLeave as canDeleteLeaveBase,
+  canEditAllTimesheets as canEditAllTimesheetsBase,
+  canDeleteTimesheet as canDeleteTimesheetBase,
+  canEditAllTimeEntries as canEditAllTimeEntriesBase,
+  canDeleteTimeEntry as canDeleteTimeEntryBase,
+  canDeleteAttendance as canDeleteAttendanceBase,
+  canEditPayroll as canEditPayrollBase,
+  canDeletePayroll as canDeletePayrollBase,
+} from '@/lib/permissions'
 
 export function hasPermission(user: User | null | undefined, permission: string): boolean {
   if (!user) return false
@@ -10,7 +29,6 @@ export function hasAnyPermission(user: User | null | undefined, permissions: str
   return permissions.some((permission) => user.permissions!.includes(permission))
 }
 
-/** View another user’s attendance history (employee profile tab). Mirrors GET /api/attendance/history rules. */
 export function canViewEmployeeAttendanceHistory(
   viewer: User | null | undefined,
   employee: { id: string; managedBy?: string | null }
@@ -28,12 +46,9 @@ export function canViewEmployeeAttendanceHistory(
   return Boolean(managerScoped)
 }
 
-/** Matches server gate for GET /api/attendance/team-today (manager or org-wide HR). */
 export function canViewTeamAttendance(user: User | null | undefined): boolean {
   if (!user) return false
-  return (
-    hasPermission(user, 'attendance.view_team') || hasPermission(user, 'timesheets.approve')
-  )
+  return canViewTeamAttendanceBase(user)
 }
 
 export function isWorkOnlyUser(user: User | null | undefined): boolean {
@@ -64,14 +79,15 @@ export function isWorkOnlyUser(user: User | null | undefined): boolean {
 }
 
 export function canAdjustAttendanceRecords(user: User | null | undefined): boolean {
-  return hasPermission(user, 'attendance.adjust_records')
+  if (!user) return false
+  return canAdjustAttendanceRecordsBase(user)
 }
 
 export function canViewAttendanceAdjustments(user: User | null | undefined): boolean {
-  return hasPermission(user, 'attendance.view_adjustments')
+  if (!user) return false
+  return canViewAttendanceAdjustmentsBase(user)
 }
 
-// Bug permissions
 export function canViewAllBugs(user: User | null | undefined): boolean {
   return hasPermission(user, 'bugs.view_all')
 }
@@ -88,65 +104,72 @@ export function canCreateBugReport(user: User | null | undefined): boolean {
   return hasPermission(user, 'bugs.create')
 }
 
-// Student permissions
 export function canDeleteStudent(user: User | null | undefined): boolean {
-  return hasPermission(user, 'students.delete')
+  if (!user) return false
+  return canDeleteStudentBase(user)
 }
 
-// Intern permissions
 export function canDeleteIntern(user: User | null | undefined): boolean {
-  return hasPermission(user, 'interns.delete')
+  if (!user) return false
+  return canDeleteInternBase(user)
 }
 
-// Batch permissions
 export function canDeleteBatch(user: User | null | undefined): boolean {
-  return hasPermission(user, 'batches.delete')
+  if (!user) return false
+  return canDeleteBatchBase(user)
 }
 
-// Leave permissions
 export function canViewAllLeaves(user: User | null | undefined): boolean {
-  return hasPermission(user, 'leaves.view_all')
+  if (!user) return false
+  return canViewAllLeavesBase(user)
 }
 
 export function canManageLeaveBalances(user: User | null | undefined): boolean {
-  return hasPermission(user, 'leaves.manage_balances')
+  if (!user) return false
+  return canManageLeaveBalancesBase(user)
 }
 
 export function canEditAllLeaves(user: User | null | undefined): boolean {
-  return hasPermission(user, 'leaves.edit_all')
+  if (!user) return false
+  return canEditAllLeavesBase(user)
 }
 
 export function canDeleteLeave(user: User | null | undefined): boolean {
-  return hasPermission(user, 'leaves.delete')
+  if (!user) return false
+  return canDeleteLeaveBase(user)
 }
 
-// Timesheet permissions
 export function canEditAllTimesheets(user: User | null | undefined): boolean {
-  return hasPermission(user, 'timesheets.edit_all')
+  if (!user) return false
+  return canEditAllTimesheetsBase(user)
 }
 
 export function canDeleteTimesheet(user: User | null | undefined): boolean {
-  return hasPermission(user, 'timesheets.delete')
+  if (!user) return false
+  return canDeleteTimesheetBase(user)
 }
 
 export function canEditAllTimeEntries(user: User | null | undefined): boolean {
-  return hasPermission(user, 'timesheet_entries.edit_all')
+  if (!user) return false
+  return canEditAllTimeEntriesBase(user)
 }
 
 export function canDeleteTimeEntry(user: User | null | undefined): boolean {
-  return hasPermission(user, 'timesheet_entries.delete')
+  if (!user) return false
+  return canDeleteTimeEntryBase(user)
 }
 
-// Attendance permissions
 export function canDeleteAttendance(user: User | null | undefined): boolean {
-  return hasPermission(user, 'attendance.delete')
+  if (!user) return false
+  return canDeleteAttendanceBase(user)
 }
 
-// Payroll permissions
 export function canEditPayroll(user: User | null | undefined): boolean {
-  return hasPermission(user, 'payroll.edit')
+  if (!user) return false
+  return canEditPayrollBase(user)
 }
 
 export function canDeletePayroll(user: User | null | undefined): boolean {
-  return hasPermission(user, 'payroll.delete')
+  if (!user) return false
+  return canDeletePayrollBase(user)
 }

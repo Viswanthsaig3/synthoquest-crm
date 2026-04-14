@@ -7,10 +7,10 @@ import { AttendanceSubNav } from '@/components/attendance/attendance-subnav'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2, ExternalLink } from 'lucide-react'
 import type { AttendanceGeofenceWarning } from '@/types/time-entry'
 import { useToast } from '@/components/ui/toast'
-import { formatDate, getErrorMessage } from '@/lib/utils'
+import { formatDate, formatTime, getErrorMessage } from '@/lib/utils'
 import { useAuth } from '@/context/auth-context'
 import { hasPermission } from '@/lib/client-permissions'
 import { getAccessToken } from '@/lib/api/client'
@@ -125,8 +125,9 @@ export default function AttendanceWarningsPage() {
                         {warning.userName || warning.userEmail || warning.userId}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        {formatDate(new Date(warning.createdAt))} -{' '}
-                        {warning.eventType === 'check_in' ? 'Check-in' : 'Check-out'}
+                        {warning.eventDate ? formatDate(new Date(warning.eventDate)) : formatDate(new Date(warning.createdAt))} -{' '}
+                        {warning.eventType === 'check_in' ? 'Check-in' : 'Check-out'}{' '}
+                        {warning.eventTime ? `at ${formatTime(new Date(warning.eventTime))}` : ''}
                       </p>
                     </div>
                     <Badge variant={warning.status === 'open' ? 'destructive' : 'outline'}>
@@ -155,6 +156,17 @@ export default function AttendanceWarningsPage() {
                   {warning.warningReason && (
                     <p className="mt-2 text-sm text-red-600">{warning.warningReason}</p>
                   )}
+                  <div className="mt-3">
+                    <a
+                      href={`https://www.google.com/maps?q=${warning.latitude},${warning.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      View location on map
+                    </a>
+                  </div>
                 </div>
               ))}
             </div>

@@ -8,7 +8,7 @@ import { verifyPassword } from '@/lib/auth/password'
 import { generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt'
 import { getIPLocation, getClientIP } from '@/lib/auth/ip-geolocation'
 import { checkLoginRateLimit, resetLoginAttempts } from '@/lib/auth/rate-limit'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -89,9 +89,7 @@ export async function POST(request: NextRequest) {
       role: user.role,
     })
 
-    const tokenId = createHash('sha256')
-      .update(`${user.id}-${Date.now()}-${Math.random()}`)
-      .digest('hex')
+    const tokenId = randomUUID()
 
     const refreshToken = await generateRefreshToken({
       userId: user.id,

@@ -92,10 +92,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       }
 
       console.error('Change user role error:', error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: error instanceof Error && error.message.includes('not found') ? 404 : 500 }
-      )
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }

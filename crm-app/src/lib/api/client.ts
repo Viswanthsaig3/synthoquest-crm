@@ -10,16 +10,51 @@ export function getAccessToken() {
   return accessToken
 }
 
-export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...options?.headers,
-    },
-  })
+async function refreshToken(): Promise<string | null> {
+  try {
+    const response = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      const newToken = result.data?.accessToken
+      if (newToken) {
+        setAccessToken(newToken)
+        return newToken
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export async function apiFetch<T>(endpoint: string, options?: RequestInit, retryOn401 = true): Promise<T> {
+  const doFetch = async (token: string | null): Promise<Response> => {
+    return fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+    })
+  }
+
+  let response = await doFetch(accessToken)
+
+  if (response.status === 401 && retryOn401) {
+    const newToken = await refreshToken()
+    if (newToken) {
+      response = await doFetch(newToken)
+    }
+  }
 
   const text = await response.text()
   let data: unknown
@@ -32,7 +67,17 @@ export async function apiFetch<T>(endpoint: string, options?: RequestInit): Prom
   }
 
   if (!response.ok) {
-    const err = data as { error?: string }
+    const err = data as { error?: string; details?: Array<{ message?: string; path?: (string | number)[] }> }
+    if (err?.details?.length) {
+      const fieldErrors = err.details
+        .filter(d => d.message)
+        .map(d => {
+          const field = d.path?.join('.') || ''
+          return field ? `${field}: ${d.message}` : d.message
+        })
+        .join('; ')
+      throw new Error(fieldErrors || err?.error || 'Validation error')
+    }
     throw new Error(err?.error || 'API request failed')
   }
 

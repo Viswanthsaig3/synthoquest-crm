@@ -7,7 +7,7 @@ interface InternProfileRow {
   user_id: string
   alternate_phone: string | null
   internship_type: InternshipType
-  duration: '1_month' | '2_months' | '3_months'
+  duration: string
   college: string
   degree: string
   academic_year: string
@@ -28,6 +28,9 @@ interface InternProfileRow {
   performance_rating: number | null
   feedback: string | null
   stipend: number | null
+  fee_paid: number | null
+  total_fee: number | null
+  remaining_balance: number | null
   notes: string
   approval_status: 'pending' | 'approved' | 'rejected'
   approved_by: string | null
@@ -57,12 +60,12 @@ function toDate(value?: string | null): Date | undefined {
 }
 
 function normalizeProfile(row: InternUserRow): InternProfileRow {
-  const profile = Array.isArray(row.intern_profiles)
+  const rawProfile = Array.isArray(row.intern_profiles)
     ? row.intern_profiles[0]
     : row.intern_profiles
 
-  return (
-    profile || {
+  if (!rawProfile) {
+    return {
       user_id: row.id,
       alternate_phone: null,
       internship_type: 'unpaid',
@@ -87,6 +90,9 @@ function normalizeProfile(row: InternUserRow): InternProfileRow {
       performance_rating: null,
       feedback: null,
       stipend: null,
+      fee_paid: null,
+      total_fee: null,
+      remaining_balance: null,
       notes: '',
       approval_status: 'pending',
       approved_by: null,
@@ -96,7 +102,45 @@ function normalizeProfile(row: InternUserRow): InternProfileRow {
       updated_at: row.updated_at,
       deleted_at: null,
     }
-  )
+  }
+
+  return {
+    user_id: rawProfile.user_id,
+    alternate_phone: rawProfile.alternate_phone ?? null,
+    internship_type: rawProfile.internship_type ?? 'unpaid',
+    duration: rawProfile.duration ?? '3_months',
+    college: rawProfile.college ?? '',
+    degree: rawProfile.degree ?? '',
+    academic_year: rawProfile.academic_year ?? '',
+    skills: rawProfile.skills ?? [],
+    resume_url: rawProfile.resume_url ?? null,
+    linkedin_url: rawProfile.linkedin_url ?? null,
+    portfolio_url: rawProfile.portfolio_url ?? null,
+    start_date: rawProfile.start_date ?? null,
+    expected_end_date: rawProfile.expected_end_date ?? null,
+    actual_end_date: rawProfile.actual_end_date ?? null,
+    intern_status: rawProfile.intern_status ?? 'applied',
+    source: rawProfile.source ?? 'website',
+    lead_id: rawProfile.lead_id ?? null,
+    converted_from: rawProfile.converted_from ?? null,
+    converted_at: rawProfile.converted_at ?? null,
+    converted_by: rawProfile.converted_by ?? null,
+    supervisor_id: rawProfile.supervisor_id ?? null,
+    performance_rating: rawProfile.performance_rating ?? null,
+    feedback: rawProfile.feedback ?? null,
+    stipend: rawProfile.stipend ?? null,
+    fee_paid: rawProfile.fee_paid ?? null,
+    total_fee: rawProfile.total_fee ?? null,
+    remaining_balance: rawProfile.remaining_balance ?? null,
+    notes: rawProfile.notes ?? '',
+    approval_status: rawProfile.approval_status ?? 'pending',
+    approved_by: rawProfile.approved_by ?? null,
+    approved_at: rawProfile.approved_at ?? null,
+    rejection_reason: rawProfile.rejection_reason ?? null,
+    created_at: rawProfile.created_at,
+    updated_at: rawProfile.updated_at,
+    deleted_at: rawProfile.deleted_at ?? null,
+  }
 }
 
 function mapInternRow(row: InternUserRow): Intern {
@@ -110,7 +154,7 @@ function mapInternRow(row: InternUserRow): Intern {
     managedBy: row.managed_by,
     alternatePhone: profile.alternate_phone || undefined,
     internshipType: profile.internship_type,
-    duration: profile.duration,
+    duration: profile.duration as Intern['duration'],
     department: row.department as Intern['department'],
     college: profile.college,
     degree: profile.degree,
@@ -132,6 +176,9 @@ function mapInternRow(row: InternUserRow): Intern {
     performanceRating: profile.performance_rating || undefined,
     feedback: profile.feedback || undefined,
     stipend: profile.stipend || undefined,
+    feePaid: profile.fee_paid || undefined,
+    totalFee: profile.total_fee || undefined,
+    remainingBalance: profile.remaining_balance || undefined,
     compensationType: row.compensation_type || undefined,
     compensationAmount: row.compensation_amount,
     notes: profile.notes,
@@ -268,7 +315,7 @@ export async function createIntern(input: {
   profile: {
     alternatePhone?: string
     internshipType: InternshipType
-    duration: '1_month' | '2_months' | '3_months'
+    duration: string
     college: string
     degree: string
     year: string
@@ -289,6 +336,8 @@ export async function createIntern(input: {
     performanceRating?: number
     feedback?: string
     stipend?: number
+    totalFee?: number
+    feePaid?: number
     notes?: string
     approvalStatus?: 'pending' | 'approved' | 'rejected'
     approvedBy?: string
@@ -299,11 +348,30 @@ export async function createIntern(input: {
   const supabase = await createAdminClient()
 
   const compensationType: CompensationType =
-    input.compensationType || (input.profile.internshipType === 'paid' ? 'paid' : 'unpaid')
+    input.compensationType || input.profile.internshipType
   const compensationAmount =
     compensationType === 'paid'
       ? (input.compensationAmount ?? input.profile.stipend ?? null)
+      : compensationType === 'paid_by_student'
+      ? (input.compensationAmount ?? input.profile.feePaid ?? null)
       : null
+
+  // Check if email already exists (including soft-deleted) and clean up
+  const { data: existingUser } = await supabase
+    .from('users')
+    .select('id, deleted_at')
+    .eq('email', input.email)
+    .single()
+
+  if (existingUser) {
+    // If soft-deleted, hard delete to free up the email
+    if (existingUser.deleted_at) {
+      await supabase.from('users').delete().eq('id', existingUser.id)
+    } else {
+      // Active user exists with this email
+      throw new Error('Email already in use by an active user')
+    }
+  }
 
   const { data: userRow, error: userError } = await supabase
     .from('users')
@@ -353,6 +421,11 @@ export async function createIntern(input: {
     performance_rating: input.profile.performanceRating || null,
     feedback: input.profile.feedback || null,
     stipend: input.profile.stipend || null,
+    total_fee: input.profile.totalFee || null,
+    fee_paid: input.profile.feePaid || null,
+    remaining_balance: input.profile.totalFee && input.profile.feePaid 
+      ? input.profile.totalFee - input.profile.feePaid 
+      : input.profile.totalFee || null,
     notes: input.profile.notes || '',
     approval_status: input.profile.approvalStatus || 'pending',
     approved_by: input.profile.approvedBy || null,
@@ -361,11 +434,22 @@ export async function createIntern(input: {
   })
 
   if (profileError) {
+    // Hard delete the user to free up the email
     await supabase
       .from('users')
-      .update({ deleted_at: new Date().toISOString() })
+      .delete()
       .eq('id', userId)
     throw profileError
+  }
+
+  if (input.profile.internshipType === 'paid_by_student' && input.profile.feePaid && input.profile.feePaid > 0) {
+    await supabase.from('intern_payments').insert({
+      intern_id: userId,
+      amount: input.profile.feePaid,
+      payment_method: 'cash',
+      payment_date: new Date().toISOString().split('T')[0],
+      notes: 'Initial payment during intern creation',
+    })
   }
 
   const created = await getInternById(userId)
@@ -384,7 +468,7 @@ export async function updateIntern(
     profile?: Partial<{
       alternatePhone: string
       internshipType: InternshipType
-      duration: '1_month' | '2_months' | '3_months'
+      duration: string
       college: string
       degree: string
       year: string
@@ -405,11 +489,17 @@ export async function updateIntern(
       performanceRating: number
       feedback: string
       stipend: number
+      feePaid: number
+      totalFee: number
       notes: string
       approvalStatus: 'pending' | 'approved' | 'rejected'
       approvedBy: string
       approvedAt: string
       rejectionReason: string
+      approval_status: 'pending' | 'approved' | 'rejected'
+      approved_by: string
+      approved_at: string
+      rejection_reason: string
     }>
   }
 ): Promise<Intern> {
@@ -457,6 +547,8 @@ export async function updateIntern(
     if (patch.profile.performanceRating !== undefined) profileUpdates.performance_rating = patch.profile.performanceRating
     if (patch.profile.feedback !== undefined) profileUpdates.feedback = patch.profile.feedback
     if (patch.profile.stipend !== undefined) profileUpdates.stipend = patch.profile.stipend
+    if (patch.profile.feePaid !== undefined) profileUpdates.fee_paid = patch.profile.feePaid
+    if (patch.profile.totalFee !== undefined) profileUpdates.total_fee = patch.profile.totalFee
     if (patch.profile.notes !== undefined) profileUpdates.notes = patch.profile.notes
     if (patch.profile.approvalStatus !== undefined) profileUpdates.approval_status = patch.profile.approvalStatus
     if (patch.profile.approvedBy !== undefined) profileUpdates.approved_by = patch.profile.approvedBy
@@ -516,4 +608,25 @@ export async function deleteIntern(id: string): Promise<void> {
     .eq('id', id)
 
   if (userError) throw userError
+}
+
+export async function getInternStipends(userIds: string[]): Promise<Map<string, number>> {
+  if (userIds.length === 0) return new Map()
+  
+  const supabase = await createAdminClient()
+  const { data, error } = await supabase
+    .from('intern_profiles')
+    .select('user_id, stipend')
+    .in('user_id', userIds)
+    .is('deleted_at', null)
+
+  if (error) throw error
+
+  const stipendMap = new Map<string, number>()
+  for (const row of data || []) {
+    if (row.stipend !== null) {
+      stipendMap.set(row.user_id, row.stipend)
+    }
+  }
+  return stipendMap
 }

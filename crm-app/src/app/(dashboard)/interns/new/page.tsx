@@ -36,8 +36,11 @@ const createInternSchema = z.object({
     .regex(/[!@#$%^&*(),.?":{}|<>]/, 'Password must contain a special character'),
   department: z.string().min(1, 'Department is required'),
   managedBy: z.string().optional().nullable(),
-  internshipType: z.enum(['paid', 'unpaid']),
-  duration: z.enum(['1_month', '2_months', '3_months']),
+  internshipType: z.enum(['paid', 'unpaid', 'paid_by_student']),
+  duration: z.enum([
+    '1_month', '2_months', '3_months', '4_months', '5_months', '6_months',
+    '7_months', '8_months', '9_months', '10_months', '11_months', '12_months'
+  ]),
   college: z.string().min(1, 'College is required'),
   degree: z.string().min(1, 'Degree is required'),
   year: z.string().min(1, 'Year is required'),
@@ -45,6 +48,8 @@ const createInternSchema = z.object({
   startDate: z.string().optional(),
   source: z.string().optional(),
   stipend: z.coerce.number().min(0).optional().nullable(),
+  totalFee: z.coerce.number().min(0).optional().nullable(),
+  feePaid: z.coerce.number().min(0).optional().nullable(),
   notes: z.string().optional(),
 })
 
@@ -97,12 +102,18 @@ export default function NewInternPage() {
       startDate: '',
       source: 'website',
       stipend: null,
+      totalFee: null,
+      feePaid: null,
       notes: '',
     },
   })
 
   const internshipType = watch('internshipType')
   const password = watch('password')
+  const totalFee = watch('totalFee')
+  const feePaid = watch('feePaid')
+
+  const remainingBalance = (totalFee || 0) - (feePaid || 0)
 
   useEffect(() => {
     async function loadOptions() {
@@ -144,7 +155,8 @@ export default function NewInternPage() {
         department: data.department,
         managedBy: data.managedBy || null,
         compensationType: data.internshipType,
-        compensationAmount: data.internshipType === 'paid' ? data.stipend || null : null,
+        compensationAmount: data.internshipType === 'paid' ? data.stipend || null : 
+                           data.internshipType === 'paid_by_student' ? data.feePaid || null : null,
         profile: {
           internshipType: data.internshipType,
           duration: data.duration,
@@ -155,6 +167,8 @@ export default function NewInternPage() {
           startDate: data.startDate || undefined,
           source: data.source || 'website',
           stipend: data.internshipType === 'paid' ? data.stipend || undefined : undefined,
+          totalFee: data.internshipType === 'paid_by_student' ? data.totalFee || undefined : undefined,
+          feePaid: data.internshipType === 'paid_by_student' ? data.feePaid || undefined : undefined,
           notes: data.notes || undefined,
           status: 'active',
           approvalStatus: 'approved',
@@ -328,7 +342,31 @@ export default function NewInternPage() {
                 {internshipType === 'paid' && (
                   <div className="space-y-2">
                     <Label htmlFor="stipend">Stipend Amount</Label>
-                    <Input id="stipend" type="number" step="1000" {...register('stipend')} placeholder="₹ amount" />
+                    <Input id="stipend" type="number" step="1000" {...register('stipend')} placeholder="₹ amount paid to intern" />
+                    <p className="text-xs text-muted-foreground">Monthly stipend paid to intern</p>
+                  </div>
+                )}
+                {internshipType === 'paid_by_student' && (
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="totalFee">Total Fee *</Label>
+                      <Input id="totalFee" type="number" step="100" min="0" {...register('totalFee')} placeholder="₹ total fee" />
+                      <p className="text-xs text-muted-foreground">Total fee expected from student</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="feePaid">Initial Payment</Label>
+                      <Input id="feePaid" type="number" step="100" min="0" {...register('feePaid')} placeholder="₹ initial payment" />
+                      <p className="text-xs text-muted-foreground">Amount paid now (can be 0)</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Remaining Balance</Label>
+                      <div className={`p-2 rounded-md border ${remainingBalance > 0 ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                        <p className={`text-lg font-bold ${remainingBalance > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                          ₹{(remainingBalance || 0).toLocaleString()}
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Auto-calculated: Total - Paid</p>
+                    </div>
                   </div>
                 )}
               </div>

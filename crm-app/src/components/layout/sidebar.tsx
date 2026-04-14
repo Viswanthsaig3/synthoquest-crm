@@ -177,6 +177,7 @@ export function SidebarNavPanel({ onNavigate, variant = 'desktop' }: SidebarNavP
       return [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, items: [{ href: '/', label: 'Overview', icon: LayoutDashboard }] },
         { id: 'work', label: 'Work', icon: ClipboardList, items: workItems },
+        { id: 'settings', label: 'Settings', icon: Settings, items: [{ href: '/settings/profile', label: 'Settings', icon: Settings }] },
       ]
     }
 

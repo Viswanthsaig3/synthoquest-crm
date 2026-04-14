@@ -1,9 +1,18 @@
 import { SignJWT, jwtVerify } from 'jose'
-import { getServerEnv } from '@/lib/env'
 
-const env = getServerEnv()
-const JWT_SECRET = new TextEncoder().encode(env.JWT_SECRET)
-const JWT_REFRESH_SECRET = new TextEncoder().encode(env.JWT_REFRESH_SECRET)
+function getJwtSecrets() {
+  const JWT_SECRET = process.env.JWT_SECRET
+  const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET
+  
+  if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+    throw new Error('Missing JWT_SECRET or JWT_REFRESH_SECRET environment variables')
+  }
+  
+  return {
+    access: new TextEncoder().encode(JWT_SECRET),
+    refresh: new TextEncoder().encode(JWT_REFRESH_SECRET),
+  }
+}
 
 export interface JWTPayload {
   userId: string
@@ -23,8 +32,9 @@ export interface RefreshTokenPayload {
 }
 
 export async function generateAccessToken(payload: JWTPayload): Promise<string> {
+  const secrets = getJwtSecrets()
   const iat = Math.floor(Date.now() / 1000)
-  const exp = iat + 4 * 60 * 60 // 4 hours (refresh cookie still renews session)
+  const exp = iat + 4 * 60 * 60
 
   return new SignJWT({
     userId: payload.userId,
@@ -34,12 +44,13 @@ export async function generateAccessToken(payload: JWTPayload): Promise<string> 
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt(iat)
     .setExpirationTime(exp)
-    .sign(JWT_SECRET)
+    .sign(secrets.access)
 }
 
 export async function generateRefreshToken(payload: RefreshTokenPayload): Promise<string> {
+  const secrets = getJwtSecrets()
   const iat = Math.floor(Date.now() / 1000)
-  const exp = iat + 7 * 24 * 60 * 60 // 7 days
+  const exp = iat + 7 * 24 * 60 * 60
 
   return new SignJWT({
     userId: payload.userId,
@@ -48,12 +59,13 @@ export async function generateRefreshToken(payload: RefreshTokenPayload): Promis
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt(iat)
     .setExpirationTime(exp)
-    .sign(JWT_REFRESH_SECRET)
+    .sign(secrets.refresh)
 }
 
 export async function verifyAccessToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET)
+    const secrets = getJwtSecrets()
+    const { payload } = await jwtVerify(token, secrets.access)
     return payload as unknown as JWTPayload
   } catch {
     return null
@@ -62,7 +74,8 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload | nul
 
 export async function verifyRefreshToken(token: string): Promise<RefreshTokenPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_REFRESH_SECRET)
+    const secrets = getJwtSecrets()
+    const { payload } = await jwtVerify(token, secrets.refresh)
     return payload as unknown as RefreshTokenPayload
   } catch {
     return null

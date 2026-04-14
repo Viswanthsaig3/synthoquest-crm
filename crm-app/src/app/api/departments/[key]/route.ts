@@ -34,7 +34,7 @@ export async function PATCH(
 ) {
   return withAuth(request, async (user) => {
     try {
-      const canManage = await hasPermission(user, 'employees.manage')
+      const canManage = await hasPermission(user, 'departments.manage')
       if (!canManage) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
@@ -49,10 +49,7 @@ export async function PATCH(
         return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 })
       }
       console.error('Update department error:', error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }

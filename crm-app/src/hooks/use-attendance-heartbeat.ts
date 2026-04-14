@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useCallback } from 'react'
+import { getAccessToken } from '@/lib/api/client'
 
 interface HeartbeatSettings {
   heartbeatIntervalMinutes: number
@@ -10,6 +11,7 @@ interface HeartbeatSettings {
 
 interface UseAttendanceHeartbeatOptions {
   isCheckedIn: boolean
+  sessionId?: string | null
   onAutoCheckout?: () => void
   onError?: (error: Error) => void
 }
@@ -23,19 +25,37 @@ interface UseAttendanceHeartbeatReturn {
 export function useAttendanceHeartbeat(
   options: UseAttendanceHeartbeatOptions
 ): UseAttendanceHeartbeatReturn {
-  const { isCheckedIn, onAutoCheckout, onError } = options
+  const { isCheckedIn, sessionId, onAutoCheckout, onError } = options
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastHeartbeatRef = useRef<Date | null>(null)
   const settingsRef = useRef<HeartbeatSettings | null>(null)
   const isActiveRef = useRef<boolean>(true)
   const isFetchingSettingsRef = useRef<boolean>(false)
+  const isCheckedInRef = useRef<boolean>(isCheckedIn)
+  const sessionIdRef = useRef<string | null | undefined>(sessionId)
+
+  useEffect(() => {
+    isCheckedInRef.current = isCheckedIn
+    sessionIdRef.current = sessionId ?? null
+  }, [isCheckedIn, sessionId])
+
+  const getAuthHeaders = useCallback(() => {
+    const token = getAccessToken()
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    }
+  }, [])
 
   const fetchSettings = useCallback(async (): Promise<HeartbeatSettings | null> => {
     if (isFetchingSettingsRef.current) return null
     isFetchingSettingsRef.current = true
     
     try {
-      const response = await fetch('/api/attendance/heartbeat', { method: 'GET' })
+      const response = await fetch('/api/attendance/heartbeat', {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      })
       if (!response.ok) {
         throw new Error('Failed to fetch heartbeat settings')
       }
@@ -48,13 +68,10 @@ export function useAttendanceHeartbeat(
     } finally {
       isFetchingSettingsRef.current = false
     }
-  }, [])
+  }, [getAuthHeaders])
 
   const sendHeartbeat = useCallback(async (): Promise<void> => {
-    if (!isCheckedIn || !isActiveRef.current) return
-    if (document.visibilityState !== 'visible') {
-      return
-    }
+    if (!isCheckedInRef.current || !isActiveRef.current) return
 
     const now = new Date()
     const lastHeartbeat = lastHeartbeatRef.current
@@ -69,7 +86,7 @@ export function useAttendanceHeartbeat(
     try {
       const response = await fetch('/api/attendance/heartbeat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
       })
 
       if (!response.ok) {
@@ -90,7 +107,33 @@ export function useAttendanceHeartbeat(
         onError(error instanceof Error ? error : new Error('Heartbeat failed'))
       }
     }
-  }, [isCheckedIn, onAutoCheckout, onError])
+  }, [getAuthHeaders, onAutoCheckout, onError])
+
+  const sendFinalHeartbeat = useCallback(() => {
+    if (!isCheckedInRef.current) return
+    
+    const token = getAccessToken()
+    if (!token) return
+    
+    const payload = JSON.stringify({
+      token: token,
+      sessionId: sessionIdRef.current,
+      timestamp: new Date().toISOString(),
+      event: 'page_unload',
+    })
+    
+    if (navigator.sendBeacon) {
+      const blob = new Blob([payload], { type: 'application/json' })
+      navigator.sendBeacon('/api/attendance/heartbeat/final', blob)
+    } else {
+      fetch('/api/attendance/heartbeat/final', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     if (!isCheckedIn) {
@@ -134,8 +177,18 @@ export function useAttendanceHeartbeat(
       }
     }
 
+    const handleBeforeUnload = () => {
+      sendFinalHeartbeat()
+    }
+
+    const handlePageHide = () => {
+      sendFinalHeartbeat()
+    }
+
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('focus', handleFocus)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('pagehide', handlePageHide)
 
     return () => {
       if (intervalRef.current) {
@@ -144,8 +197,10 @@ export function useAttendanceHeartbeat(
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('pagehide', handlePageHide)
     }
-  }, [isCheckedIn, sendHeartbeat, fetchSettings])
+  }, [isCheckedIn, sendHeartbeat, fetchSettings, sendFinalHeartbeat])
 
   return {
     sendHeartbeat,

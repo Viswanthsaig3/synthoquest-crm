@@ -98,11 +98,21 @@ export const INTERNSHIP_DURATIONS = [
   { value: '1_month', label: '1 Month' },
   { value: '2_months', label: '2 Months' },
   { value: '3_months', label: '3 Months' },
+  { value: '4_months', label: '4 Months' },
+  { value: '5_months', label: '5 Months' },
+  { value: '6_months', label: '6 Months' },
+  { value: '7_months', label: '7 Months' },
+  { value: '8_months', label: '8 Months' },
+  { value: '9_months', label: '9 Months' },
+  { value: '10_months', label: '10 Months' },
+  { value: '11_months', label: '11 Months' },
+  { value: '12_months', label: '12 Months (1 Year)' },
 ]
 
 export const INTERNSHIP_TYPES = [
   { value: 'paid', label: 'Paid Internship' },
   { value: 'unpaid', label: 'Unpaid Internship' },
+  { value: 'paid_by_student', label: 'Paid By Student' },
 ]
 
 export const CALL_OUTCOMES = [

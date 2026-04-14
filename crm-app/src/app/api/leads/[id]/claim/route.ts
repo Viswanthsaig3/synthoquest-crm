@@ -19,16 +19,18 @@ export async function POST(
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
-      if (lead.assignedTo) {
-        return NextResponse.json({ error: 'Lead already claimed' }, { status: 400 })
+      try {
+        const updated = await claimLead(params.id, user.userId)
+        return NextResponse.json({ data: updated })
+      } catch (claimError) {
+        if (claimError instanceof Error && claimError.message.includes('already claimed')) {
+          return NextResponse.json({ error: 'Lead already claimed' }, { status: 400 })
+        }
+        throw claimError
       }
-
-      const updated = await claimLead(params.id, user.userId)
-
-      return NextResponse.json({ data: updated })
     } catch (error) {
       console.error('Claim lead error:', error)
-      return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }

@@ -7,7 +7,7 @@
 -- IMPORTANT: Store the new password securely and communicate it only through
 -- secure channels to authorized administrators.
 -- 
--- New admin password: SqAdm1n@93b2b50b
+-- Admin password set via environment variable ADMIN_INITIAL_PASSWORD
 -- This password should be changed immediately after first login.
 
 UPDATE users 

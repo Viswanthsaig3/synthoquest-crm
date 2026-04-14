@@ -1,11 +1,12 @@
-import type { Intern } from '@/types/intern'
+import type { Intern, InternshipType, InternDuration } from '@/types/intern'
+import type { CompensationType } from '@/types/user'
 import { apiFetch } from '@/lib/api/client'
 
 export async function getInterns(filters?: {
   search?: string
   department?: string
   status?: string
-  internshipType?: 'paid' | 'unpaid'
+  internshipType?: InternshipType
   managedBy?: string
   page?: number
   limit?: number
@@ -35,11 +36,11 @@ export async function createIntern(data: {
   phone?: string
   department: string
   managedBy?: string | null
-  compensationType?: 'paid' | 'unpaid'
+  compensationType?: CompensationType
   compensationAmount?: number | null
   profile: {
-    internshipType: 'paid' | 'unpaid'
-    duration: '1_month' | '2_months' | '3_months'
+    internshipType: InternshipType
+    duration: InternDuration | string
     college: string
     degree: string
     year: string
@@ -52,6 +53,8 @@ export async function createIntern(data: {
     status?: 'applied' | 'shortlisted' | 'offered' | 'active' | 'completed' | 'dropped' | 'rejected'
     source?: string
     stipend?: number
+    totalFee?: number
+    feePaid?: number
     notes?: string
     approvalStatus?: 'pending' | 'approved' | 'rejected'
   }
@@ -66,10 +69,12 @@ export async function updateIntern(
   id: string,
   data: Partial<{
     name: string
+    email: string
     phone: string
     department: string
     managedBy: string | null
-    compensationType: 'paid' | 'unpaid'
+    password: string
+    compensationType: CompensationType
     compensationAmount: number | null
     compensationReason: string
     profile: Record<string, unknown>
@@ -91,6 +96,12 @@ export async function rejectIntern(id: string, reason: string): Promise<{ data: 
   return apiFetch(`/interns/${id}/reject`, {
     method: 'POST',
     body: JSON.stringify({ reason }),
+  })
+}
+
+export async function deleteIntern(id: string): Promise<{ message: string }> {
+  return apiFetch(`/interns/${id}`, {
+    method: 'DELETE',
   })
 }
 

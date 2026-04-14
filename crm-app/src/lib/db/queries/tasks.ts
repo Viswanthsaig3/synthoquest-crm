@@ -345,7 +345,7 @@ export async function assignTask(id: string, userId: string, assignedBy: string)
 export async function startTask(id: string, userId: string): Promise<Task> {
   const supabase = await createAdminClient()
   
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('tasks')
     .update({
       status: 'in_progress',
@@ -353,12 +353,20 @@ export async function startTask(id: string, userId: string): Promise<Task> {
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
+    .eq('status', 'pending')
+    .select()
+    .single()
 
-  if (error) throw error
+  if (error) {
+    if (error.code === 'PGRST116') {
+      throw new Error('Task already started or not found')
+    }
+    throw error
+  }
 
   await createHistoryRecord(id, userId, 'started', { status: 'pending' }, { status: 'in_progress' })
 
-  return getTaskById(id) as Promise<Task>
+  return data as Task
 }
 
 export async function completeTask(id: string, userId: string, data?: { actualHours?: number }): Promise<Task> {
@@ -516,7 +524,7 @@ export async function createTimeLog(
 ): Promise<TaskTimeLog> {
   const supabase = await createAdminClient()
   
-  let durationMinutes
+  let durationMinutes: number | undefined
   if (startedAt && endedAt) {
     const start = new Date(startedAt).getTime()
     const end = new Date(endedAt).getTime()
@@ -538,20 +546,19 @@ export async function createTimeLog(
 
   if (error) throw error
 
-  if (durationMinutes && endedAt) {
-    const { data: task } = await supabase
-      .from('tasks')
-      .select('actual_hours')
-      .eq('id', taskId)
-      .single()
+  // ATOMIC INCREMENT: Prevents race condition from concurrent time logs
+  // Never read actual_hours in app code — let DB do the math atomically
+  if (durationMinutes && durationMinutes > 0) {
+    const hoursToAdd = durationMinutes / 60
+    const { error: incrementError } = await supabase.rpc('increment_task_hours', {
+      p_task_id: taskId,
+      p_hours: hoursToAdd,
+    })
 
-    const currentHours = task?.actual_hours || 0
-    const newHours = currentHours + (durationMinutes / 60)
-
-    await supabase
-      .from('tasks')
-      .update({ actual_hours: newHours, updated_at: new Date().toISOString() })
-      .eq('id', taskId)
+    if (incrementError) {
+      console.error('Failed to increment task hours:', incrementError)
+      throw new Error(`Failed to update task hours: ${incrementError.message}`)
+    }
   }
 
   return {

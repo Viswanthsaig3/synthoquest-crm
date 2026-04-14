@@ -82,7 +82,7 @@ export default function EditEmployeePage() {
         setValue('department', emp.department)
         setValue('role', emp.role)
         setValue('status', emp.status)
-        setValue('compensationType', emp.compensationType || (emp.salary && emp.salary > 0 ? 'paid' : 'unpaid'))
+        setValue('compensationType', (emp.compensationType === 'paid_by_student' ? 'unpaid' : emp.compensationType) || (emp.salary && emp.salary > 0 ? 'paid' : 'unpaid'))
         setValue('compensationAmount', emp.compensationAmount ?? emp.salary ?? null)
 
         setEmployeeManagedBy(emp.managedBy || null)

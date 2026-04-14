@@ -2,7 +2,7 @@ export type Role = string
 export const SYSTEM_ROLES = ['admin'] as const
 export type Department = 'sales' | 'training' | 'marketing'
 export type EmployeeStatus = 'active' | 'inactive' | 'suspended'
-export type CompensationType = 'paid' | 'unpaid'
+export type CompensationType = 'paid' | 'unpaid' | 'paid_by_student'
 
 export interface User {
   id: string

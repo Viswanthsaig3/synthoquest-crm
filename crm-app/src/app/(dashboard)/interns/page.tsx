@@ -18,10 +18,10 @@ import {
 } from '@/components/ui/table'
 import { INTERN_STATUSES, INTERNSHIP_TYPES } from '@/lib/constants'
 import { formatDate, getErrorMessage, getInitials } from '@/lib/utils'
-import { canViewInterns, canManageAllInterns } from '@/lib/permissions'
-import { Briefcase, Eye, Mail, Phone, Calendar, Loader2, Plus } from 'lucide-react'
+import { canViewInterns, canManageAllInterns, canDeleteIntern, canManageEmployees } from '@/lib/permissions'
+import { Briefcase, Eye, Mail, Phone, Calendar, Loader2, Plus, Trash2, Edit2, IndianRupee } from 'lucide-react'
 import Link from 'next/link'
-import { getInterns } from '@/lib/api/interns'
+import { getInterns, deleteIntern } from '@/lib/api/interns'
 import { useToast } from '@/components/ui/toast'
 import type { Intern } from '@/types/intern'
 
@@ -76,7 +76,21 @@ export default function InternsPage() {
     }
   }, [interns, total])
 
+  const handleDeleteIntern = async (internId: string, internName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${internName}"? This action cannot be undone.`)) return
+    try {
+      await deleteIntern(internId)
+      setInterns((prev) => prev.filter((i) => i.id !== internId))
+      setTotal((prev) => prev - 1)
+      toast({ title: 'Success', description: 'Intern deleted successfully' })
+    } catch (error: unknown) {
+      toast({ title: 'Error', description: getErrorMessage(error, 'Failed to delete intern'), variant: 'destructive' })
+    }
+  }
+
   if (!user) return null
+
+  const canDelete = canDeleteIntern(user) || canManageEmployees(user)
 
   const getStatusColor = (status: string) => {
     const statusConfig = INTERN_STATUSES.find((s) => s.value === status)
@@ -210,11 +224,17 @@ export default function InternsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{intern.duration.replace('_', ' ')}</TableCell>
-                      <TableCell>
-                        <Badge variant={intern.internshipType === 'paid' ? 'default' : 'secondary'} className="capitalize">
-                          {intern.internshipType}
-                        </Badge>
-                      </TableCell>
+<TableCell>
+                         <Badge variant={intern.internshipType === 'paid' ? 'default' : intern.internshipType === 'paid_by_student' ? 'outline' : 'secondary'} className="capitalize">
+                           {intern.internshipType === 'paid_by_student' ? 'Paid By Student' : intern.internshipType}
+                         </Badge>
+                         {intern.internshipType === 'paid_by_student' && intern.remainingBalance !== undefined && intern.remainingBalance > 0 && (
+                           <Badge variant="outline" className="ml-2 text-orange-600 border-orange-300">
+                             <IndianRupee className="h-3 w-3 mr-1" />
+                             ₹{intern.remainingBalance.toLocaleString()} due
+                           </Badge>
+                         )}
+                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge className={getStatusColor(intern.status)}>{intern.status}</Badge>
@@ -235,13 +255,30 @@ export default function InternsPage() {
                           <span className="text-muted-foreground">-</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Link href={`/interns/${intern.id}`}>
-                          <button className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent">
-                            <Eye className="h-4 w-4" />
-                          </button>
-                        </Link>
-                      </TableCell>
+<TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {canCreate && (
+                              <Link href={`/interns/${intern.id}/edit`}>
+                                <button className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent">
+                                  <Edit2 className="h-4 w-4" />
+                                </button>
+                              </Link>
+                            )}
+                            <Link href={`/interns/${intern.id}`}>
+                              <button className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent">
+                                <Eye className="h-4 w-4" />
+                              </button>
+                            </Link>
+                            {canDelete && (
+                              <button
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-red-50 text-red-600 hover:text-red-700"
+                                onClick={() => handleDeleteIntern(intern.id, intern.name)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

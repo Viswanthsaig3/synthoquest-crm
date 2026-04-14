@@ -12,12 +12,15 @@ const createInternSchema = z.object({
   phone: z.string().optional(),
   department: z.string().min(1),
   managedBy: z.string().uuid().optional().nullable(),
-  compensationType: z.enum(['paid', 'unpaid']).optional(),
+  compensationType: z.enum(['paid', 'unpaid', 'paid_by_student']).optional(),
   compensationAmount: z.number().min(0).optional().nullable(),
   profile: z.object({
     alternatePhone: z.string().optional(),
-    internshipType: z.enum(['paid', 'unpaid']),
-    duration: z.enum(['1_month', '2_months', '3_months']),
+    internshipType: z.enum(['paid', 'unpaid', 'paid_by_student']),
+    duration: z.enum([
+      '1_month', '2_months', '3_months', '4_months', '5_months', '6_months',
+      '7_months', '8_months', '9_months', '10_months', '11_months', '12_months'
+    ]),
     college: z.string().min(1),
     degree: z.string().min(1),
     year: z.string().min(1),
@@ -40,6 +43,8 @@ const createInternSchema = z.object({
     performanceRating: z.number().min(1).max(5).optional(),
     feedback: z.string().optional(),
     stipend: z.number().min(0).optional(),
+    totalFee: z.number().min(0).optional(),
+    feePaid: z.number().min(0).optional(),
     notes: z.string().optional(),
     approvalStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
     approvedBy: z.string().uuid().optional(),
@@ -83,7 +88,7 @@ export async function GET(request: NextRequest) {
             | 'rejected'
             | null) || undefined,
         internshipType:
-          (searchParams.get('internshipType') as 'paid' | 'unpaid' | null) || undefined,
+          (searchParams.get('internshipType') as 'paid' | 'unpaid' | 'paid_by_student' | null) || undefined,
         managedBy: canViewAll ? searchParams.get('managedBy') || undefined : user.userId,
         page,
         limit,

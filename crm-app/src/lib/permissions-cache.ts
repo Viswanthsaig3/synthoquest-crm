@@ -5,7 +5,15 @@
  * Stores the user's role and updated_at alongside permissions.
  * If the user's role or updated_at changed since cache was set, the cache
  * entry is invalidated immediately — no waiting for TTL.
+ * 
+ * SERVERLESS: In serverless environments (Vercel, AWS Lambda), set
+ * DISABLE_PERMISSION_CACHE=true to bypass the in-memory cache.
+ * Each instance has its own memory, so the cache won't be consistent
+ * across instances.
  */
+
+const DISABLE_CACHE = process.env.DISABLE_PERMISSION_CACHE === 'true'
+
 class PermissionCache {
   private cache: Map<string, {
     permissions: string[]
@@ -13,14 +21,15 @@ class PermissionCache {
     userUpdatedAt: string
     timestamp: number
   }>
-  // SECURITY: Reduced from 5 min → 60 sec to limit stale permission window
-  private ttl: number = 60 * 1000 // 60 seconds
+  private ttl: number = 60 * 1000
+  private cleanupInterval: NodeJS.Timeout | null = null
 
   constructor() {
     this.cache = new Map()
   }
 
   set(userId: string, permissions: string[], role: string, userUpdatedAt: string): void {
+    if (DISABLE_CACHE) return
     this.cache.set(userId, {
       permissions,
       role,
@@ -29,28 +38,21 @@ class PermissionCache {
     })
   }
 
-  /**
-   * Get cached permissions. Returns null if:
-   * - No cache entry exists
-   * - TTL expired
-   * - User's role changed since cache was set
-   * - User record was updated since cache was set
-   */
   get(userId: string, currentRole?: string, currentUpdatedAt?: string): string[] | null {
+    if (DISABLE_CACHE) return null
+    
     const cached = this.cache.get(userId)
     
     if (!cached) {
       return null
     }
 
-    // TTL check
     const age = Date.now() - cached.timestamp
     if (age > this.ttl) {
       this.cache.delete(userId)
       return null
     }
 
-    // SECURITY: Staleness check — if role or updated_at changed, invalidate immediately
     if (currentRole && cached.role !== currentRole) {
       this.cache.delete(userId)
       return null
@@ -71,7 +73,6 @@ class PermissionCache {
     this.cache.clear()
   }
 
-  // Cleanup expired entries
   cleanup(): void {
     const now = Date.now()
     const entriesToDelete: string[] = []
@@ -84,14 +85,24 @@ class PermissionCache {
     
     entriesToDelete.forEach(userId => this.cache.delete(userId))
   }
+
+  startCleanupInterval(): void {
+    if (DISABLE_CACHE || this.cleanupInterval) return
+    this.cleanupInterval = setInterval(() => {
+      this.cleanup()
+    }, 5 * 60 * 1000)
+  }
+
+  stopCleanupInterval(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval)
+      this.cleanupInterval = null
+    }
+  }
 }
 
-// Singleton instance
 export const permissionCache = new PermissionCache()
 
-// Periodic cleanup (every 5 minutes — matches reduced TTL)
-if (typeof global !== 'undefined') {
-  setInterval(() => {
-    permissionCache.cleanup()
-  }, 5 * 60 * 1000)
+if (typeof global !== 'undefined' && !DISABLE_CACHE) {
+  permissionCache.startCleanupInterval()
 }

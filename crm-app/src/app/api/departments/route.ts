@@ -5,7 +5,7 @@ import { createDepartment, listDepartments } from '@/lib/db/queries/departments'
 import { z } from 'zod'
 
 const createDepartmentSchema = z.object({
-  key: z.string().min(2).max(64).regex(/^[a-z_]+$/),
+  key: z.string().min(2).max(64).regex(/^[a-z][a-z0-9_]*$/, 'Key must start with lowercase letter and contain only lowercase letters, numbers, and underscores'),
   name: z.string().min(1).max(255),
   sortOrder: z.number().int().optional(),
 })
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withAuth(request, async (user) => {
     try {
-      const canManage = await hasPermission(user, 'employees.manage')
+      const canManage = await hasPermission(user, 'departments.manage')
       if (!canManage) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
@@ -45,10 +45,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 })
       }
       console.error('Create department error:', error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }

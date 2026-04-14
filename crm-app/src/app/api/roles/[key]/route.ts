@@ -49,10 +49,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { key: s
         return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 })
       }
       console.error('Update role error:', error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: error instanceof Error && error.message.includes('not found') ? 404 : 500 }
-      )
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }
@@ -75,10 +72,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { key: 
       return NextResponse.json({ message: 'Role archived successfully' })
     } catch (error) {
       console.error('Archive role error:', error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: error instanceof Error && error.message.includes('not found') ? 404 : 500 }
-      )
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }

@@ -17,7 +17,11 @@ export async function GET(request: NextRequest) {
       const month = parseInt(searchParams.get('month') || '') || undefined
       const year = parseInt(searchParams.get('year') || '') || undefined
 
-      const summary = await getPayrollSummary(canViewAll ? month : undefined, canViewAll ? year : undefined)
+      const summary = await getPayrollSummary(
+        canViewAll ? month : undefined,
+        canViewAll ? year : undefined,
+        canViewAll ? undefined : user.userId
+      )
 
       return NextResponse.json({ data: summary })
     } catch (error) {

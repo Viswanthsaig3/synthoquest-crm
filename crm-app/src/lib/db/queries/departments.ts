@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/db/client'
+import { createAdminClient } from '@/lib/db/server-client'
 
 export interface DepartmentRow {
   id: string

@@ -2,22 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { hasPermission } from '@/lib/auth/authorization'
 import { deleteIntern, getInternById, updateIntern } from '@/lib/db/queries/interns'
-import { getUserById, updateUserCompensation } from '@/lib/db/queries/users'
+import { getUserById, updateUserCompensation, updateUserEmail, updateUserPassword } from '@/lib/db/queries/users'
+import { hashPassword } from '@/lib/auth/password'
 import { z } from 'zod'
 
 const updateInternSchema = z.object({
   name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
   phone: z.string().optional(),
   department: z.string().min(1).optional(),
   managedBy: z.string().uuid().nullable().optional(),
-  compensationType: z.enum(['paid', 'unpaid']).optional(),
+  password: z.string().min(8).optional(),
+  compensationType: z.enum(['paid', 'unpaid', 'paid_by_student']).optional(),
   compensationAmount: z.number().min(0).nullable().optional(),
   compensationReason: z.string().max(500).optional(),
   profile: z
     .object({
       alternatePhone: z.string().optional(),
-      internshipType: z.enum(['paid', 'unpaid']).optional(),
-      duration: z.enum(['1_month', '2_months', '3_months']).optional(),
+      internshipType: z.enum(['paid', 'unpaid', 'paid_by_student']).optional(),
+      duration: z.enum([
+        '1_month', '2_months', '3_months', '4_months', '5_months', '6_months',
+        '7_months', '8_months', '9_months', '10_months', '11_months', '12_months'
+      ]).optional(),
       college: z.string().min(1).optional(),
       degree: z.string().min(1).optional(),
       year: z.string().min(1).optional(),
@@ -36,6 +42,7 @@ const updateInternSchema = z.object({
       performanceRating: z.number().min(1).max(5).optional(),
       feedback: z.string().optional(),
       stipend: z.number().min(0).optional(),
+      totalFee: z.number().min(0).optional(),
       notes: z.string().optional(),
       approvalStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
       approvedBy: z.string().uuid().optional().or(z.literal('')),
@@ -110,6 +117,29 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       const body = await request.json()
       const validated = updateInternSchema.parse(body)
 
+      // Handle email update (requires admin/HR)
+      if (validated.email && validated.email !== target.email) {
+        if (!canManageAll) {
+          return NextResponse.json(
+            { error: 'Only admin/HR can change email' },
+            { status: 403 }
+          )
+        }
+        await updateUserEmail(params.id, validated.email)
+      }
+
+      // Handle password update
+      if (validated.password) {
+        if (!canManageAll) {
+          return NextResponse.json(
+            { error: 'Only admin/HR can change password' },
+            { status: 403 }
+          )
+        }
+        const passwordHash = await hashPassword(validated.password)
+        await updateUserPassword(params.id, passwordHash)
+      }
+
       const requestedCompUpdate =
         validated.compensationType !== undefined || validated.compensationAmount !== undefined
 
@@ -159,6 +189,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
               supervisorId: normalizeOptional(validated.profile.supervisorId),
               approvedBy: normalizeOptional(validated.profile.approvedBy),
               approvedAt: normalizeOptional(validated.profile.approvedAt),
+              totalFee: validated.profile.totalFee,
             }
           : undefined,
       })
@@ -170,6 +201,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
           { error: 'Validation error', details: error.errors },
           { status: 400 }
         )
+      }
+
+      const message = error instanceof Error ? error.message : 'Internal server error'
+      if (message.includes('Email already in use')) {
+        return NextResponse.json({ error: message }, { status: 400 })
       }
 
       console.error('Update intern error:', error)

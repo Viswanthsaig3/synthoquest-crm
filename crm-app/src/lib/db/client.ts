@@ -1,3 +1,12 @@
+/**
+ * @deprecated Use '@/lib/db/server-client' instead for all server-side operations.
+ * 
+ * This file creates a simple Supabase client without SSR cookie handling.
+ * For proper Next.js App Router compatibility, use server-client.ts which
+ * handles cookies via @supabase/ssr.
+ * 
+ * Kept for potential edge cases, but not recommended for production use.
+ */
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { getServerEnv } from '@/lib/env'
 

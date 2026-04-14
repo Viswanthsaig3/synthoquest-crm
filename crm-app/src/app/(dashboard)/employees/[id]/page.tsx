@@ -13,7 +13,7 @@ import { StatusBadge, StatsCard, EmptyState } from '@/components/shared'
 import { formatDate, getInitials, formatCurrency, formatTime, getErrorMessage } from '@/lib/utils'
 import { useAuth } from '@/context/auth-context'
 import { canManageAssignedEmployees, canManageEmployees } from '@/lib/permissions'
-import { getEmployeeById } from '@/lib/api/employees'
+import { getEmployeeById, deleteEmployee } from '@/lib/api/employees'
 import { getTasks } from '@/lib/api/tasks'
 import { getTimesheets } from '@/lib/api/timesheets'
 import { canViewEmployeeAttendanceHistory } from '@/lib/client-permissions'
@@ -22,6 +22,7 @@ import type { User as UserType } from '@/types/user'
 import type { Task } from '@/lib/db/queries/tasks'
 import type { Timesheet } from '@/types/timesheet'
 import type { AttendanceRecord } from '@/types/time-entry'
+import { useToast } from '@/components/ui/toast'
 import { 
   ArrowLeft, 
   Edit, 
@@ -35,7 +36,8 @@ import {
   ClipboardList,
   IndianRupee,
   Eye,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -52,6 +54,7 @@ export default function EmployeeProfilePage() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { user: currentUser } = useAuth()
+  const { toast } = useToast()
   const employeeId = params.id as string
   const initialTab = searchParams.get('tab') || 'profile'
 
@@ -63,6 +66,7 @@ export default function EmployeeProfilePage() {
   const [error, setError] = useState<string | null>(null)
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([])
   const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     async function fetchData() {
@@ -165,6 +169,23 @@ export default function EmployeeProfilePage() {
     (canManageEmployees(currentUser) ||
       (canManageAssignedEmployees(currentUser) && employee.managedBy === currentUser.id))
 
+  const canDelete = currentUser && canManageEmployees(currentUser) && employee.id !== currentUser.id
+
+  const handleDelete = async () => {
+    if (!canDelete || !employee) return
+    if (!window.confirm(`Are you sure you want to delete "${employee.name}"? This action cannot be undone.`)) return
+    try {
+      setDeleting(true)
+      await deleteEmployee(employee.id)
+      toast({ title: 'Success', description: 'Employee deleted successfully' })
+      router.push('/employees')
+    } catch (err) {
+      toast({ title: 'Error', description: getErrorMessage(err, 'Failed to delete employee'), variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const showAttendanceTab =
     !!currentUser && canViewEmployeeAttendanceHistory(currentUser, employee)
   const daysWithCheckIn90d = new Set(
@@ -224,6 +245,12 @@ export default function EmployeeProfilePage() {
                 Edit
               </Button>
             </Link>
+            {canDelete && (
+              <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+                {deleting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                Delete
+              </Button>
+            )}
           </div>
         )}
       </div>

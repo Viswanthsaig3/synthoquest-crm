@@ -1,4 +1,4 @@
-import { createAdminClient } from '../client'
+import { createAdminClient } from '../server-client'
 import type {
   TimeEntry,
   CreateTimeEntryInput,

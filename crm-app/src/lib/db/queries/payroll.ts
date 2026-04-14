@@ -581,7 +581,7 @@ export async function getPayrollRuns(filters?: {
   }
 }
 
-export async function getPayrollSummary(month?: number, year?: number): Promise<PayrollSummary> {
+export async function getPayrollSummary(month?: number, year?: number, userId?: string): Promise<PayrollSummary> {
   const supabase = await createAdminClient()
   let query = supabase
     .from('payroll_records')
@@ -590,6 +590,7 @@ export async function getPayrollSummary(month?: number, year?: number): Promise<
 
   if (month) query = query.eq('month', month)
   if (year) query = query.eq('year', year)
+  if (userId) query = query.eq('user_id', userId)
 
   const { data, error } = await query
   if (error) throw error

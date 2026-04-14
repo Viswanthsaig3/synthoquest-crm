@@ -69,6 +69,9 @@ export interface AttendanceRecord {
   deviceFingerprint?: string | null
   heartbeatCount?: number
   suspiciousFlags?: string[]
+  locationVerificationFailed?: boolean
+  spoofingDetected?: boolean
+  spoofingReason?: string | null
   createdAt: string
   updatedAt: string
   deletedAt?: string
@@ -94,6 +97,10 @@ export interface UserHomeLocation {
   label?: string
   updatedAt: string
   updatedBy?: string
+  verificationMethod?: string
+  verificationConfidence?: number
+  verificationDistanceKm?: number
+  isVerified?: boolean
 }
 
 export interface OfficeLocationSettings {
@@ -101,6 +108,7 @@ export interface OfficeLocationSettings {
   officeLng: number | null
   allowedRadiusMeters: number
   requireGeolocation: boolean
+  blockOnVerificationFailure: boolean
   updatedAt?: string
 }
 
@@ -111,6 +119,8 @@ export interface AttendanceGeofenceWarning {
   userName?: string
   userEmail?: string
   eventType: 'check_in' | 'check_out'
+  eventTime?: string | null
+  eventDate?: string | null
   latitude: number | null
   longitude: number | null
   nearestType: GeofenceReferenceType

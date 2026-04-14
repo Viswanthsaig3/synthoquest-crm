@@ -18,16 +18,12 @@ import {
 
 import { formatDate } from '@/lib/utils'
 import { hasPermission } from '@/lib/client-permissions'
+import { MONTHS } from '@/lib/constants'
 import { FileText, Plus, Calendar, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { LeavesSubNav } from '@/components/leaves/leaves-subnav'
 import type { Leave, LeaveBalance } from '@/types/leave'
 import { useToast } from '@/components/ui/toast'
-
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-]
 
 export default function LeavesPage() {
   const { user, token } = useAuth()

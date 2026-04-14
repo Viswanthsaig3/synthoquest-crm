@@ -108,7 +108,7 @@ export async function updateRolePermissions(
     throw new Error('Cannot modify admin permissions')
   }
 
-  // Get permission IDs
+  // Get permission IDs for the requested keys
   const { data: permissions, error: permError } = await supabase
     .from('permissions')
     .select('id, key')
@@ -117,33 +117,63 @@ export async function updateRolePermissions(
   if (permError) throw permError
 
   if (permissions.length !== permissionKeys.length) {
-    throw new Error('Some permissions not found')
+    const foundKeys = permissions.map((p: { key: string }) => p.key)
+    const missingKeys = permissionKeys.filter((k) => !foundKeys.includes(k))
+    throw new Error(`Permissions not found: ${missingKeys.join(', ')}`)
   }
 
-  const permissionIds = permissions.map((p: { id: string }) => p.id)
+  const newPermissionIds = permissions.map((p: { id: string }) => p.id)
 
-  // Start transaction-like operation
-  // Delete existing permissions
-  const { error: deleteError } = await supabase
+  // SAFE UPDATE STRATEGY: Never leave role with zero permissions
+  // Step 1: Get current permission IDs for this role
+  const { data: currentPerms, error: currentError } = await supabase
     .from('role_permissions')
-    .delete()
+    .select('permission_id')
     .eq('role_id', role.id)
 
-  if (deleteError) throw deleteError
+  if (currentError) throw currentError
 
-  // Insert new permissions
-  const inserts = permissionIds.map((permissionId: string) => ({
-    role_id: role.id,
-    permission_id: permissionId,
-    created_by: createdBy,
-  }))
+  const currentPermissionIds = new Set(
+    (currentPerms || []).map((p: { permission_id: string }) => p.permission_id)
+  )
+  const newPermissionIdSet = new Set(newPermissionIds)
 
-  if (inserts.length > 0) {
+  // Step 2: Find permissions to ADD (in new but not in current)
+  const toAdd = newPermissionIds.filter((id) => !currentPermissionIds.has(id))
+
+  // Step 3: Find permissions to REMOVE (in current but not in new)
+  const toRemove = Array.from(currentPermissionIds).filter(
+    (id) => !newPermissionIdSet.has(id)
+  )
+
+  // Step 4: INSERT new permissions first (upsert handles duplicates safely)
+  if (toAdd.length > 0) {
+    const inserts = toAdd.map((permissionId) => ({
+      role_id: role.id,
+      permission_id: permissionId,
+      created_by: createdBy,
+    }))
+
     const { error: insertError } = await supabase
       .from('role_permissions')
-      .insert(inserts)
+      .upsert(inserts, {
+        onConflict: 'role_id,permission_id',
+        ignoreDuplicates: true,
+      })
 
     if (insertError) throw insertError
+  }
+
+  // Step 5: DELETE only permissions not in the new set
+  // At this point, the role has at least all the new permissions
+  if (toRemove.length > 0) {
+    const { error: deleteError } = await supabase
+      .from('role_permissions')
+      .delete()
+      .eq('role_id', role.id)
+      .in('permission_id', toRemove)
+
+    if (deleteError) throw deleteError
   }
 
   // Return updated role

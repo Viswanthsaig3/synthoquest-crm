@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react'
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react'
 import { User, AuthState } from '@/types/user'
 import { setAccessToken as setGlobalAccessToken } from '@/lib/api/client'
 
@@ -11,17 +11,16 @@ interface ExtendedAuthState extends AuthState {
 
 const AuthContext = createContext<ExtendedAuthState | undefined>(undefined)
 
+const REFRESH_INTERVAL_MS = 3.5 * 60 * 60 * 1000
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const getAccessToken = useCallback(() => accessToken, [accessToken])
-
-  useEffect(() => {
-    silentRefresh()
-  }, [])
 
   async function silentRefresh(): Promise<boolean> {
     try {
@@ -68,6 +67,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    silentRefresh()
+  }, [])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isAuthenticated) {
+        silentRefresh()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isAuthenticated])
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      refreshIntervalRef.current = setInterval(() => {
+        silentRefresh()
+      }, REFRESH_INTERVAL_MS)
+    }
+
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+        refreshIntervalRef.current = null
+      }
+    }
+  }, [isAuthenticated])
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
@@ -116,6 +147,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(null)
       setGlobalAccessToken(null)
       setIsAuthenticated(false)
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+        refreshIntervalRef.current = null
+      }
     }
   }
 

@@ -1,6 +1,11 @@
+import type { InternPayment, InternPaymentSummary } from './intern-payment'
+
 export type InternStatus = 'applied' | 'shortlisted' | 'offered' | 'active' | 'completed' | 'dropped' | 'rejected'
-export type InternshipType = 'paid' | 'unpaid'
+export type InternshipType = 'paid' | 'unpaid' | 'paid_by_student'
 export type InternDepartment = 'training' | 'sales' | 'marketing' | 'content'
+export type InternDuration = 
+  | '1_month' | '2_months' | '3_months' | '4_months' | '5_months' | '6_months'
+  | '7_months' | '8_months' | '9_months' | '10_months' | '11_months' | '12_months'
 
 export interface Intern {
   id: string
@@ -10,60 +15,53 @@ export interface Intern {
   managedBy?: string | null
   alternatePhone?: string
   
-  // Internship Details
   internshipType: InternshipType
-  duration: '1_month' | '2_months' | '3_months'
+  duration: InternDuration
   department: InternDepartment
   
-  // Education
   college: string
   degree: string
   year: string
   
-  // Skills & Links
   skills: string[]
   resumeUrl?: string
   linkedinUrl?: string
   portfolioUrl?: string
   
-  // Dates
   startDate?: Date
   expectedEndDate?: Date
   actualEndDate?: Date
   
-  // Status & Workflow
   status: InternStatus
   source: string
   
-  // Conversion Info
   leadId?: string
   convertedFrom?: string
   convertedAt?: Date
   convertedBy?: string
   
-  // Supervisor
   supervisorId?: string
   supervisorName?: string
   
-  // Performance
   performanceRating?: number
   feedback?: string
   
-  // Stipend (for paid interns)
   stipend?: number
-  compensationType?: 'paid' | 'unpaid'
+  feePaid?: number
+  totalFee?: number
+  remainingBalance?: number
+  compensationType?: 'paid' | 'unpaid' | 'paid_by_student'
   compensationAmount?: number | null
+  paymentSummary?: InternPaymentSummary
+  payments?: InternPayment[]
   
-  // Notes
   notes: string
   
-  // Approval
   approvalStatus: 'pending' | 'approved' | 'rejected'
   approvedBy?: string
   approvedAt?: Date
   rejectionReason?: string
   
-  // Metadata
   createdAt: Date
   updatedAt: Date
 }

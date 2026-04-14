@@ -1,5 +1,5 @@
-import { createAdminClient } from '../client'
-import { evaluateGeofence } from '@/lib/geo/geofence'
+import { createAdminClient } from '../server-client'
+import { evaluateGeofence, haversineDistanceMeters } from '@/lib/geo/geofence'
 import type {
   AttendanceGeofenceWarning,
   AttendanceRecord,
@@ -142,9 +142,14 @@ export async function checkIn(
     ipAddress?: string
     userAgent?: string
     deviceFingerprint?: string
-    ipDerivedLat?: number | null    // SECURITY: CRIT-01 — IP geolocation
+    ipDerivedLat?: number | null
     ipDerivedLng?: number | null
     ipGpsDistanceKm?: number | null
+  },
+  enforcementPolicy?: {
+    blockOnVerificationFailure: boolean
+    maxIpGpsDistanceKm: number
+    minGpsPrecisionMeters: number
   }
 ): Promise<AttendanceRecord> {
   const supabase = await createAdminClient()
@@ -152,10 +157,14 @@ export async function checkIn(
   const today = now.toISOString().split('T')[0]
   const checkInTime = now.toISOString()
 
-  // Auto-close any open sessions from previous days before checking today's
+  const policy = enforcementPolicy || {
+    blockOnVerificationFailure: true,
+    maxIpGpsDistanceKm: 50,
+    minGpsPrecisionMeters: 5,
+  }
+
   await closeStaleOpenSessions(userId, today)
 
-  // Now check if there's an open session specifically from TODAY
   const { data: openToday, error: openErr } = await supabase
     .from('attendance_records')
     .select('id')
@@ -189,6 +198,13 @@ export async function checkIn(
   const orgSettings = await getOfficeLocationSettings()
   const homeLocation = await getUserHomeLocation(userId)
 
+  if (orgSettings.requireGeolocation && isFirstSessionOfDay && !homeLocation) {
+    throw new Error(
+      'Home location required: Please set your home/work location in Settings before checking in. ' +
+      'Go to Settings → Home Location to configure your allowed check-in area.'
+    )
+  }
+
   const geofence = evaluateGeofence({
     latitude,
     longitude,
@@ -209,13 +225,46 @@ export async function checkIn(
       : null,
   })
 
-  // ENFORCEMENT: Block out-of-radius check-ins when geolocation is required
-  if (orgSettings.requireGeolocation && geofence.inRadius === false) {
-    throw new Error(
-      `Check-in denied: You are outside the allowed geofence radius. ` +
-        `Distance: ${geofence.distanceMeters}m, Allowed: ${geofence.radiusMeters}m. ` +
-        `Please check in from the office or your approved home location.`
+  let spoofingDetected = false
+  let spoofingReason: string | null = null
+
+  if (homeLocation && latitude && longitude) {
+    const homeDistance = haversineDistanceMeters(
+      { latitude, longitude },
+      { latitude: homeLocation.latitude, longitude: homeLocation.longitude }
     )
+    if (homeDistance < policy.minGpsPrecisionMeters) {
+      spoofingDetected = true
+      spoofingReason = `GPS spoofing suspected: Position is ${homeDistance}m from reference point (below ${policy.minGpsPrecisionMeters}m threshold). Real GPS typically has 10-15m error margin.`
+    }
+  }
+
+  if (metadata?.ipGpsDistanceKm && metadata.ipGpsDistanceKm > policy.maxIpGpsDistanceKm) {
+    spoofingDetected = true
+    spoofingReason = spoofingReason
+      ? `${spoofingReason} Impossible travel detected: Client GPS is ${metadata.ipGpsDistanceKm}km from IP-derived location.`
+      : `Impossible travel detected: Client GPS is ${metadata.ipGpsDistanceKm}km from IP-derived location.`
+  }
+
+  if (orgSettings.blockOnVerificationFailure === true && policy.blockOnVerificationFailure) {
+    if (metadata?.ipDerivedLat === null || metadata?.ipDerivedLng === null) {
+      console.warn('[checkIn] IP geolocation null, but NOT blocking - flagging instead:', {
+        ip: metadata?.ipAddress,
+        ipDerivedLat: metadata?.ipDerivedLat,
+        ipDerivedLng: metadata?.ipDerivedLng,
+        blockOnVerificationFailure: orgSettings.blockOnVerificationFailure,
+        policyBlock: policy.blockOnVerificationFailure,
+      })
+      // Don't throw - just flag for admin review
+    }
+
+    if (metadata?.ipGpsDistanceKm && metadata.ipGpsDistanceKm > policy.maxIpGpsDistanceKm) {
+      console.warn('[checkIn] IP-GPS distance exceeds max, but NOT blocking - flagging instead:', {
+        ipGpsDistanceKm: metadata.ipGpsDistanceKm,
+        maxAllowed: policy.maxIpGpsDistanceKm,
+      })
+      // Don't throw - just flag for admin review
+    }
   }
 
   const workStartTime = schedule?.work_start_time || orgSettings?.default_work_start_time || '09:00:00'
@@ -247,11 +296,14 @@ export async function checkIn(
     late_by_minutes: lateByMinutes,
     notes: notes,
     heartbeat_count: 0,
+    location_verification_failed: metadata?.ipDerivedLat === null || metadata?.ipDerivedLng === null,
+    spoofing_detected: spoofingDetected,
+    spoofing_reason: spoofingReason,
   }
 
   if (metadata?.ipAddress) {
     insertData.ip_address = metadata.ipAddress
-    insertData.check_in_ip = metadata.ipAddress // HIGH-01: Store for heartbeat IP comparison
+    insertData.check_in_ip = metadata.ipAddress
   }
   if (metadata?.userAgent) {
     insertData.user_agent = metadata.userAgent
@@ -259,7 +311,6 @@ export async function checkIn(
   if (metadata?.deviceFingerprint) {
     insertData.device_fingerprint = metadata.deviceFingerprint
   }
-  // SECURITY: CRIT-01 — Store IP-derived location for GPS spoofing audit
   if (metadata?.ipDerivedLat != null) {
     insertData.ip_derived_lat = metadata.ipDerivedLat
   }
@@ -276,9 +327,6 @@ export async function checkIn(
     .select()
     .single()
 
-  // SECURITY: CRIT-04 — DB unique index prevents duplicate open sessions.
-  // If two concurrent check-ins race past the application-level check above,
-  // the partial unique index (idx_attendance_one_open_session_per_user) rejects the second.
   if (error) {
     if (error.code === '23505') {
       throw new Error('Check out of your current session before starting a new check-in.')
@@ -286,7 +334,23 @@ export async function checkIn(
     throw error
   }
 
-  if (geofence.inRadius === false) {
+  const shouldCreateWarning =
+    geofence.inRadius === false ||
+    spoofingDetected ||
+    (metadata?.ipGpsDistanceKm && metadata.ipGpsDistanceKm > policy.maxIpGpsDistanceKm)
+
+  if (shouldCreateWarning) {
+    const warningReasons: string[] = []
+    if (geofence.inRadius === false) {
+      warningReasons.push('Outside allowed office/home radius during check-in.')
+    }
+    if (spoofingDetected) {
+      warningReasons.push(spoofingReason || 'GPS spoofing detected.')
+    }
+    if (metadata?.ipGpsDistanceKm && metadata.ipGpsDistanceKm > policy.maxIpGpsDistanceKm) {
+      warningReasons.push(`IP-GPS distance: ${metadata.ipGpsDistanceKm}km exceeds threshold of ${policy.maxIpGpsDistanceKm}km.`)
+    }
+
     await createAttendanceGeofenceWarning({
       attendanceRecordId: data.id,
       userId,
@@ -296,7 +360,7 @@ export async function checkIn(
       nearestType: geofence.nearestType,
       distanceMeters: geofence.distanceMeters,
       allowedRadiusMeters: geofence.radiusMeters,
-      warningReason: 'Outside allowed office/home radius during check-in.',
+      warningReason: warningReasons.join(' | '),
     })
   }
 
@@ -507,6 +571,7 @@ const defaultOrgSettings = (): OfficeLocationSettings & {
   officeLng: null,
   allowedRadiusMeters: 500,
   requireGeolocation: false,
+  blockOnVerificationFailure: false,
   updatedAt: new Date().toISOString(),
   default_work_start_time: '09:00:00',
   default_late_threshold_minutes: 0,
@@ -527,6 +592,7 @@ export async function getOfficeLocationSettings(): Promise<
     officeLng: data.office_lng,
     allowedRadiusMeters: data.allowed_radius_meters || 500,
     requireGeolocation: Boolean(data.require_geolocation),
+    blockOnVerificationFailure: Boolean(data.block_on_verification_failure ?? false),
     updatedAt: data.updated_at,
     default_work_start_time: data.default_work_start_time,
     default_late_threshold_minutes: data.default_late_threshold_minutes ?? 0,
@@ -566,6 +632,7 @@ export async function updateOfficeLocationSettings(input: {
     officeLng: data.office_lng,
     allowedRadiusMeters: data.allowed_radius_meters,
     requireGeolocation: Boolean(data.require_geolocation),
+    blockOnVerificationFailure: Boolean(data.block_on_verification_failure ?? false),
     updatedAt: data.updated_at,
   }
 }
@@ -650,6 +717,12 @@ export async function getAttendanceGeofenceWarnings(filters: {
         id,
         name,
         email
+      ),
+      attendance_records!attendance_geofence_warnings_attendance_record_id_fkey (
+        id,
+        check_in_time,
+        check_out_time,
+        date
       )
     `
     )
@@ -669,6 +742,12 @@ export async function getAttendanceGeofenceWarnings(filters: {
     attendance_record_id?: string | null
     user_id: string
     users?: { name?: string; email?: string } | null
+    attendance_records?: { 
+      id: string
+      check_in_time?: string | null
+      check_out_time?: string | null
+      date?: string | null
+    } | null
     event_type: 'check_in' | 'check_out'
     latitude: number | null
     longitude: number | null
@@ -688,6 +767,10 @@ export async function getAttendanceGeofenceWarnings(filters: {
     userName: row.users?.name,
     userEmail: row.users?.email,
     eventType: row.event_type,
+    eventTime: row.event_type === 'check_in' 
+      ? row.attendance_records?.check_in_time 
+      : row.attendance_records?.check_out_time,
+    eventDate: row.attendance_records?.date,
     latitude: row.latitude,
     longitude: row.longitude,
     nearestType: row.nearest_type,
@@ -1056,6 +1139,161 @@ export async function getAttendanceRecordById(recordId: string): Promise<Attenda
   }
 
   return transformAttendance(data as AttendanceRecordRow)
+}
+
+export async function detectImpossibleTravel(
+  userId: string,
+  currentLat: number,
+  currentLng: number,
+  currentTime: Date = new Date()
+): Promise<{ suspicious: boolean; speedKmPerHour: number | null; distanceKm: number | null; previousRecordId: string | null }> {
+  const supabase = await createAdminClient()
+
+  const { data: recentRecords, error } = await supabase
+    .from('attendance_records')
+    .select('id, check_in_time, check_in_lat, check_in_lng, check_out_time, check_out_lat, check_out_lng')
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .gte('check_in_time', new Date(Date.now() - 24 * 3600000).toISOString())
+    .order('check_in_time', { ascending: false })
+    .limit(5)
+
+  if (error) throw error
+
+  if (!recentRecords || recentRecords.length === 0) {
+    return { suspicious: false, speedKmPerHour: null, distanceKm: null, previousRecordId: null }
+  }
+
+  for (const record of recentRecords) {
+    const lat = record.check_in_lat ?? record.check_out_lat
+    const lng = record.check_in_lng ?? record.check_out_lng
+    const time = record.check_out_time ?? record.check_in_time
+
+    if (lat === null || lng === null) continue
+
+    const distanceKm = haversineDistanceMeters(
+      { latitude: currentLat, longitude: currentLng },
+      { latitude: lat, longitude: lng }
+    ) / 1000
+
+    const timeDiffMs = currentTime.getTime() - new Date(time).getTime()
+    const timeDiffHours = timeDiffMs / 3600000
+
+    if (timeDiffHours < 0.01) continue
+
+    const speedKmPerHour = distanceKm / timeDiffHours
+
+    const maxReasonableSpeed = 1000
+
+    if (speedKmPerHour > maxReasonableSpeed) {
+      return {
+        suspicious: true,
+        speedKmPerHour: Math.round(speedKmPerHour * 10) / 10,
+        distanceKm: Math.round(distanceKm * 10) / 10,
+        previousRecordId: record.id,
+      }
+    }
+  }
+
+  return { suspicious: false, speedKmPerHour: null, distanceKm: null, previousRecordId: null }
+}
+
+export async function getAttendanceAnomalies(filters?: {
+  fromDate?: string
+  toDate?: string
+  userId?: string
+  limit?: number
+}): Promise<{
+  records: AttendanceRecord[]
+  anomalies: {
+    spoofing: AttendanceRecord[]
+    impossibleTravel: AttendanceRecord[]
+    verificationFailed: AttendanceRecord[]
+    selfUpdatedLocations: { userId: string; userName: string; userEmail: string; latitude: number; longitude: number; updatedAt: string; updatedBy: string }[]
+  }
+}> {
+  const supabase = await createAdminClient()
+  const limit = Math.min(filters?.limit || 100, 500)
+
+  const { data: records, error } = await supabase
+    .from('attendance_records')
+    .select(`
+      *,
+      users!attendance_records_user_id_fkey (
+        id, name, email
+      )
+    `)
+    .is('deleted_at', null)
+    .gte('check_in_time', filters?.fromDate || new Date(Date.now() - 7 * 24 * 3600000).toISOString())
+    .lte('check_in_time', filters?.toDate || new Date().toISOString())
+    .order('check_in_time', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+
+  const spoofing: AttendanceRecord[] = []
+  const impossibleTravel: AttendanceRecord[] = []
+  const verificationFailed: AttendanceRecord[] = []
+
+  for (const record of records || []) {
+    const transformed = transformAttendance(record as AttendanceRecordRow)
+
+    if (transformed.checkInDistanceMeters !== null && transformed.checkInDistanceMeters < 5) {
+      spoofing.push(transformed)
+    }
+
+    const ipGpsDistance = (record as { ip_gps_distance_km?: number | null }).ip_gps_distance_km
+    if (ipGpsDistance != null && ipGpsDistance > 50) {
+      impossibleTravel.push(transformed)
+    }
+
+    const ipDerivedLat = (record as { ip_derived_lat?: number | null }).ip_derived_lat
+    const ipDerivedLng = (record as { ip_derived_lng?: number | null }).ip_derived_lng
+    if (ipDerivedLat === null || ipDerivedLng === null) {
+      verificationFailed.push(transformed)
+    }
+  }
+
+  const { data: homeLocations, error: homeError } = await supabase
+    .from('user_home_locations')
+    .select(`
+      user_id, latitude, longitude, updated_at, updated_by,
+      users!user_home_locations_user_id_fkey (
+        id, name, email
+      )
+    `)
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false })
+
+  if (homeError) throw homeError
+
+  const selfUpdatedLocations: { userId: string; userName: string; userEmail: string; latitude: number; longitude: number; updatedAt: string; updatedBy: string }[] = []
+
+  for (const loc of homeLocations || []) {
+    const usersData = loc.users as unknown
+    const user = Array.isArray(usersData) ? usersData[0] : usersData as { id: string; name: string; email: string } | null
+    if (loc.updated_by === loc.user_id) {
+      selfUpdatedLocations.push({
+        userId: loc.user_id,
+        userName: user?.name || 'Unknown',
+        userEmail: user?.email || 'Unknown',
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        updatedAt: loc.updated_at,
+        updatedBy: loc.updated_by,
+      })
+    }
+  }
+
+  return {
+    records: (records || []).map((r) => transformAttendance(r as AttendanceRecordRow)),
+    anomalies: {
+      spoofing,
+      impossibleTravel,
+      verificationFailed,
+      selfUpdatedLocations,
+    },
+  }
 }
 
 export async function triggerAutoCheckout(): Promise<{ processed: number }> {

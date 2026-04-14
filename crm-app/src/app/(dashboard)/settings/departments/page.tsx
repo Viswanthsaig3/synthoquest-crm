@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/toast'
 import { useAuth } from '@/context/auth-context'
-import { canManageEmployees } from '@/lib/permissions'
+import { canManageDepartments } from '@/lib/permissions'
 import {
   getDepartments,
   createDepartment,
@@ -56,13 +56,13 @@ export default function DepartmentsSettingsPage() {
 
   if (!user) return null
 
-  if (!canManageEmployees(user)) {
+  if (!canManageDepartments(user)) {
     return (
       <div className="space-y-6">
         <Card>
           <CardContent className="py-12 text-center">
             <Building2 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">You need employees.manage to manage departments.</p>
+            <p className="text-muted-foreground">You do not have permission to manage departments.</p>
           </CardContent>
         </Card>
       </div>
@@ -74,10 +74,15 @@ export default function DepartmentsSettingsPage() {
       toast({ title: 'Key and name required', variant: 'destructive' })
       return
     }
+    const normalizedKey = newDept.key.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').replace(/^[^a-z]+/, '')
+    if (normalizedKey.length < 2) {
+      toast({ title: 'Invalid key', description: 'Key must be at least 2 characters (lowercase letters, numbers, underscores)', variant: 'destructive' })
+      return
+    }
     setSaving(true)
     try {
       const { data } = await createDepartment({
-        key: newDept.key.trim(),
+        key: normalizedKey,
         name: newDept.name.trim(),
         sortOrder: newDept.sortOrder,
       })
@@ -132,7 +137,7 @@ export default function DepartmentsSettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>New department</CardTitle>
-          <CardDescription>Key must be lowercase letters and underscores only (e.g. sales_ops).</CardDescription>
+          <CardDescription>Key auto-normalized to lowercase letters, numbers, underscores (e.g. sales_ops, training_1).</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-end">
           <div className="space-y-2 flex-1">

@@ -11,7 +11,7 @@ import {
 const homeLocationSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
-  radiusMeters: z.number().int().min(50).max(10000).default(300),
+  radiusMeters: z.number().int().min(50).max(500).default(300),
   label: z.string().max(120).optional(),
 })
 

@@ -39,6 +39,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       !!user &&
       (hasPermission(user, 'leaves.apply') || hasPermission(user, 'leaves.approve'))
 
+    const settingsAllowed =
+      !!user &&
+      (hasPermission(user, 'attendance.manage_home_location_self') || hasPermission(user, 'settings.manage'))
+
     const allowed =
       pathname === '/' ||
       pathname === '/tasks' ||
@@ -48,7 +52,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       (attendanceAllowed &&
         (pathname === '/attendance' || pathname.startsWith('/attendance/'))) ||
       (leavesAllowed &&
-        (pathname === '/leaves' || pathname.startsWith('/leaves/')))
+        (pathname === '/leaves' || pathname.startsWith('/leaves/'))) ||
+      (settingsAllowed &&
+        (pathname === '/settings' || pathname.startsWith('/settings/')))
 
     if (!allowed) {
       markWorkOnlyRedirect()

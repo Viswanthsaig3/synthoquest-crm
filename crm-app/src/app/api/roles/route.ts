@@ -89,10 +89,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 })
       }
       console.error('Create role error:', error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
     }
   })
 }

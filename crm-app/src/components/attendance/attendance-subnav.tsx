@@ -3,7 +3,7 @@
 import { useAuth } from '@/context/auth-context'
 import { hasPermission, canViewTeamAttendance, canViewAttendanceAdjustments } from '@/lib/client-permissions'
 import { SectionSubNav } from '@/components/layout/section-subnav'
-import { Calendar, Clock, Users, AlertCircle, ShieldAlert } from 'lucide-react'
+import { Calendar, Clock, Users, AlertCircle, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 export function AttendanceSubNav() {
   const { user } = useAuth()
@@ -18,7 +18,10 @@ export function AttendanceSubNav() {
       ? [{ href: '/attendance/team' as const, label: 'Team today', icon: Users }]
       : []),
     ...(canWarnings
-      ? [{ href: '/attendance/warnings' as const, label: 'Geofence warnings', icon: AlertCircle }]
+      ? [
+          { href: '/attendance/warnings' as const, label: 'Geofence warnings', icon: AlertCircle },
+          { href: '/attendance/anomalies' as const, label: 'Anomalies', icon: AlertTriangle },
+        ]
       : []),
     ...(canSecurity
       ? [{ href: '/attendance/security' as const, label: 'Security', icon: ShieldAlert }]

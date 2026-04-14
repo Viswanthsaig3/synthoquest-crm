@@ -33,6 +33,8 @@ type Permission =
   | 'interns.manage_all'
   | 'interns.manage_assigned'
   | 'interns.delete'
+  | 'interns.approve'
+  | 'interns.convert_to_employee'
   | 'batches.view'
   | 'batches.create'
   | 'batches.edit'
@@ -76,8 +78,14 @@ type Permission =
   | 'employees.manage'
   | 'employees.manage_assigned'
   | 'compensation.manage'
+  | 'roles.view'
   | 'roles.manage'
+  | 'bugs.view_all'
+  | 'bugs.create'
+  | 'bugs.manage'
+  | 'bugs.delete_screenshot'
   | 'settings.manage'
+  | 'departments.manage'
 
 function listPermissions(user: User): string[] {
   return Array.isArray(user.permissions) ? user.permissions : []
@@ -215,6 +223,11 @@ export function canManageAssignedInterns(user: User): boolean {
 
 export function canDeleteIntern(user: User): boolean {
   return hasPermissionStatic(user, 'interns.delete')
+}
+
+export function canManageInternPayments(user: User): boolean {
+  return hasPermissionStatic(user, 'interns.manage_all') || 
+         hasPermissionStatic(user, 'interns.manage_assigned')
 }
 
 export function canViewBatches(user: User): boolean {
@@ -400,6 +413,10 @@ export function canManageAssignedEmployees(user: User): boolean {
 
 export function canManageCompensation(user: User): boolean {
   return hasPermissionStatic(user, 'compensation.manage')
+}
+
+export function canManageDepartments(user: User): boolean {
+  return hasPermissionStatic(user, 'departments.manage')
 }
 
 export function canManageSettings(user: User): boolean {

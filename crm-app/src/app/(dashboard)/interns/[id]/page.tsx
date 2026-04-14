@@ -13,7 +13,7 @@ import { Select } from '@/components/ui/select'
 
 import { INTERN_STATUSES, INTERNSHIP_DURATIONS } from '@/lib/constants'
 import { formatDate, getErrorMessage, getInitials } from '@/lib/utils'
-import { canManageAssignedEmployees, canManageEmployees } from '@/lib/permissions'
+import { canManageAssignedEmployees, canManageEmployees, canDeleteIntern } from '@/lib/permissions'
 import { hasPermission } from '@/lib/client-permissions'
 import {
   Briefcase,
@@ -36,13 +36,16 @@ import {
   Save,
   Loader2,
   UserCheck,
+  Trash2,
+  IndianRupee,
 } from 'lucide-react'
 import Link from 'next/link'
-import { approveIntern, getInternById, rejectIntern, updateIntern } from '@/lib/api/interns'
+import { approveIntern, getInternById, rejectIntern, updateIntern, deleteIntern } from '@/lib/api/interns'
 import { getAssignableUsers, type AssignableUser } from '@/lib/api/employees'
 import type { Intern } from '@/types/intern'
 import { useToast } from '@/components/ui/toast'
 import { ConvertToEmployeeModal } from '@/components/interns/convert-to-employee-modal'
+import PaymentHistoryCard from '@/components/interns/payment-history-card'
 
 export default function InternDetailPage() {
   const params = useParams()
@@ -69,6 +72,24 @@ export default function InternDetailPage() {
   const canConvert =
     (user && canManageEmployees(user)) ||
     (user && hasPermission(user, 'interns.convert_to_employee'))
+  const canDeleteInternRecord =
+    (user && canDeleteIntern(user)) ||
+    (user && canManageEmployees(user))
+
+  const handleDeleteIntern = async () => {
+    if (!canDeleteInternRecord || !intern) return
+    if (!window.confirm(`Are you sure you want to delete "${intern.name}"? This action cannot be undone.`)) return
+    try {
+      setActionLoading(true)
+      await deleteIntern(intern.id)
+      toast({ title: 'Success', description: 'Intern deleted successfully' })
+      router.push('/interns')
+    } catch (error: unknown) {
+      toast({ title: 'Error', description: getErrorMessage(error, 'Failed to delete intern'), variant: 'destructive' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
 
   useEffect(() => {
     const run = async () => {
@@ -245,12 +266,28 @@ export default function InternDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {canManage && (
+            <Link href={`/interns/${intern.id}/edit`}>
+              <Button size="sm" variant="outline">
+                <Edit2 className="h-4 w-4 mr-1" />
+                Edit
+              </Button>
+            </Link>
+          )}
           <Badge className={getStatusColor(statusConfig?.color)}>
             {intern.status}
           </Badge>
           {intern.internshipType === 'paid' && intern.stipend && (
             <Badge variant="outline" className="text-green-600 border-green-300">
-              ₹{intern.stipend.toLocaleString()}/mo
+              ₹{intern.stipend.toLocaleString()}/mo stipend
+            </Badge>
+          )}
+          {intern.internshipType === 'paid_by_student' && intern.totalFee && (
+            <Badge variant="outline" className="text-purple-600 border-purple-300">
+              <IndianRupee className="h-3 w-3 mr-1" />
+              {intern.remainingBalance && intern.remainingBalance > 0 
+                ? `₹${intern.remainingBalance.toLocaleString()} balance`
+                : 'Fully Paid'}
             </Badge>
           )}
         </div>
@@ -310,6 +347,31 @@ export default function InternDetailPage() {
               >
                 <UserCheck className="h-4 w-4 mr-1" />
                 Convert to Employee
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {canDeleteInternRecord && intern && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-red-600" />
+                <span className="font-medium text-red-800">Delete Intern</span>
+                <span className="text-sm text-red-700">
+                  Permanently remove this intern from the system
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleDeleteIntern}
+                disabled={actionLoading}
+              >
+                {actionLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
+                Delete
               </Button>
             </div>
           </CardContent>
@@ -493,8 +555,8 @@ export default function InternDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Type</span>
-                  <Badge variant={intern.internshipType === 'paid' ? 'default' : 'secondary'} className="capitalize">
-                    {intern.internshipType}
+                  <Badge variant={intern.internshipType === 'paid' ? 'default' : intern.internshipType === 'paid_by_student' ? 'outline' : 'secondary'} className="capitalize">
+                    {intern.internshipType === 'paid_by_student' ? 'Paid By Student' : intern.internshipType}
                   </Badge>
                 </div>
                 <div className="flex justify-between">
@@ -509,6 +571,12 @@ export default function InternDetailPage() {
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Stipend</span>
                     <span className="text-sm font-medium text-green-600">₹{intern.stipend.toLocaleString()}/month</span>
+                  </div>
+                )}
+                {intern.feePaid && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Fee Paid</span>
+                    <span className="text-sm font-medium text-purple-600">₹{intern.feePaid.toLocaleString()}</span>
                   </div>
                 )}
               </div>
@@ -672,15 +740,21 @@ export default function InternDetailPage() {
           {canManage && (
             <Card>
               <CardContent className="p-4">
-                <p className="text-sm text-muted-foreground">
-                  Use the management actions above to approve or reject this intern. Full inline edit flow will be
-                  enabled in the next phase.
-                </p>
+                <div className="flex items-center gap-2">
+                  <Edit2 className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Use the Edit button above to modify intern details including personal info, internship details, and education.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           )}
         </div>
       </div>
+
+      {intern.internshipType === 'paid_by_student' && (
+        <PaymentHistoryCard internId={intern.id} />
+      )}
 
       {intern && (
         <ConvertToEmployeeModal

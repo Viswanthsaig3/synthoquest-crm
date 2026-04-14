@@ -15,6 +15,11 @@ export async function GET(
 ) {
   return withAuth(request, async (user) => {
     try {
+      const canView = await hasPermission(user, 'roles.view') || isAdmin(user)
+      if (!canView) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+
       const { key } = await params
       const role = await getRoleWithPermissions(key)
 
@@ -84,8 +89,8 @@ export async function PUT(request: NextRequest, { params }: { params: { key: str
 
       console.error('Update role permissions error:', error)
       return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Internal server error' },
-        { status: error instanceof Error && error.message.includes('not found') ? 404 : 500 }
+        { error: 'An unexpected error occurred. Please try again.' },
+        { status: 500 }
       )
     }
   })

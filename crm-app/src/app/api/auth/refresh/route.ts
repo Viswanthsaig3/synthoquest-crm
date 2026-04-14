@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyRefreshToken, generateAccessToken, generateRefreshToken } from '@/lib/auth/jwt'
 import { getRefreshTokenByHash, getAnyTokenByHash, createRefreshToken, revokeRefreshToken, revokeTokenFamily } from '@/lib/db/queries/refresh-tokens'
 import { createAdminClient } from '@/lib/db/server-client'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
+import { checkRefreshRateLimit } from '@/lib/auth/rate-limit'
 
 export async function POST(request: NextRequest) {
-  // SECURITY: CRIT-09 — CSRF protection: require custom header.
-  // Browsers prevent forms from setting custom headers, blocking
-  // cross-origin form-based CSRF attacks on this cookie-based endpoint.
   const xRequestedWith = request.headers.get('x-requested-with')
   if (xRequestedWith !== 'XMLHttpRequest') {
     return NextResponse.json(
@@ -32,6 +30,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Invalid or expired refresh token', code: 'INVALID_TOKEN' },
         { status: 401 }
+      )
+    }
+
+    const rateLimit = await checkRefreshRateLimit(payload.userId)
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { 
+          error: 'Too many refresh attempts. Please wait before trying again.', 
+          code: 'RATE_LIMITED',
+          retryAfter: rateLimit.resetAt 
+        },
+        { status: 429 }
       )
     }
 
@@ -93,9 +103,7 @@ export async function POST(request: NextRequest) {
       role: currentUser.role,     // Fresh from DB
     })
 
-    const newTokenId = createHash('sha256')
-      .update(`${payload.userId}-${Date.now()}-${Math.random()}`)
-      .digest('hex')
+    const newTokenId = randomUUID()
 
     const newRefreshToken = await generateRefreshToken({
       userId: payload.userId,

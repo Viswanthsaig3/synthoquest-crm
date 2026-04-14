@@ -62,10 +62,11 @@ ALWAYS use strict types:
 ### Database Query Template
 ```typescript
 // src/lib/db/queries/{entity}.ts
-import { supabase } from '../client'
+import { createAdminClient } from '../server-client'
 import type { Entity } from '@/types/entity'
 
 export async function getEntities(filters?: Filters): Promise<Entity[]> {
+  const supabase = await createAdminClient()
   const { data, error } = await supabase
     .from('entities')
     .select('*')
@@ -77,6 +78,7 @@ export async function getEntities(filters?: Filters): Promise<Entity[]> {
 }
 
 export async function getEntityById(id: string): Promise<Entity | null> {
+  const supabase = await createAdminClient()
   const { data, error } = await supabase
     .from('entities')
     .select('*')
@@ -92,6 +94,7 @@ export async function getEntityById(id: string): Promise<Entity | null> {
 }
 
 export async function createEntity(entity: Omit<Entity, 'id' | 'created_at'>): Promise<Entity> {
+  const supabase = await createAdminClient()
   const { data, error } = await supabase
     .from('entities')
     .insert(entity)

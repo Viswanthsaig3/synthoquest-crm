@@ -131,14 +131,22 @@ export default function RolesPage() {
 
   const createNewRole = async () => {
     if (!newRole.key || !newRole.name) return
+    const normalizedKey = newRole.key.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').replace(/^[^a-z]+/, '')
+    if (normalizedKey.length < 2) {
+      toast({ title: 'Invalid key', description: 'Key must be at least 2 characters (lowercase letters, numbers, underscores)', variant: 'destructive' })
+      return
+    }
     setSaving(true)
     try {
       const res = await fetch('/api/roles', {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify(newRole),
+        body: JSON.stringify({ ...newRole, key: normalizedKey }),
       })
-      if (!res.ok) throw new Error('Failed to create role')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: 'Failed to create role' }))
+        throw new Error(errData.details?.map((d: { message?: string }) => d.message).join('; ') || errData.error || 'Failed to create role')
+      }
       const json = await res.json()
       const created: RoleItem = json.data
       setRoles((prev) => [...prev, created])
@@ -146,7 +154,7 @@ export default function RolesPage() {
       setNewRole({ key: '', name: '', description: '' })
       toast({ title: 'Role created', description: 'Custom role created successfully' })
     } catch (error) {
-      toast({ title: 'Error', description: 'Unable to create role', variant: 'destructive' })
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Unable to create role', variant: 'destructive' })
     } finally {
       setSaving(false)
     }
@@ -252,8 +260,12 @@ export default function RolesPage() {
                     id="role-key"
                     placeholder="project_manager"
                     value={newRole.key}
-                    onChange={(e) => setNewRole((prev) => ({ ...prev, key: e.target.value.toLowerCase() }))}
+                    onChange={(e) => {
+                      const sanitized = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '')
+                      setNewRole((prev) => ({ ...prev, key: sanitized }))
+                    }}
                   />
+                  <p className="text-xs text-muted-foreground">Auto-normalized: lowercase letters, numbers, underscores only</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role-name">Role Name</Label>

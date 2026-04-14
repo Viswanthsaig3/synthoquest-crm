@@ -368,85 +368,52 @@ export async function deleteLeave(id: string): Promise<void> {
 export async function approveLeave(id: string, approverId: string): Promise<Leave> {
   const supabase = await createAdminClient()
   
-  const { data: leave, error: fetchError } = await supabase
-    .from('leaves')
-    .select('*')
-    .eq('id', id)
-    .is('deleted_at', null)
-    .single()
-  
-  if (fetchError || !leave) {
-    throw new Error('Leave not found')
-  }
+  const { data: result, error } = await supabase.rpc('approve_leave_atomic', {
+    p_leave_id: id,
+    p_approved_by: approverId,
+  })
 
-  if (leave.user_id === approverId) {
-    throw new Error('Cannot approve your own leave requests')
-  }
-
-  // SECURITY: CRIT-05 — Defense-in-depth: redundant status check at query layer
-  if (leave.status !== 'pending') {
-    throw new Error('Only pending leaves can be approved')
-  }
-  
-  const balanceMonth = new Date(leave.start_date).getMonth() + 1
-  const balanceYear = new Date(leave.start_date).getFullYear()
-  
-  // Check if balance exists and is sufficient
-  const { data: balance } = await supabase
-    .from('leave_balances')
-    .select('*')
-    .eq('user_id', leave.user_id)
-    .eq('year', balanceYear)
-    .eq('month', balanceMonth)
-    .single()
-  
-  if (!balance) {
-    throw new Error(`No leave balance found for ${balanceMonth}/${balanceYear}. Please allocate balance first.`)
-  }
-  
-  const remainingField = `${leave.type}_remaining`
-  const remaining = balance[remainingField as keyof typeof balance] as number
-  
-  if (remaining < leave.days) {
-    throw new Error(`Insufficient ${leave.type} leave balance. Available: ${remaining} days, Requested: ${leave.days} days`)
-  }
-  
-  const { data: updated, error } = await supabase
-    .from('leaves')
-    .update({
-      status: 'approved',
-      approved_by: approverId,
-      approved_at: new Date().toISOString(),
-      balance_year: balanceYear,
-      balance_month: balanceMonth,
-    })
-    .eq('id', id)
-    .select()
-    .single()
-  
   if (error) {
-    console.error('Error approving leave:', error)
-    throw error
+    console.error('Atomic leave approval failed:', error)
+    throw new Error('Failed to approve leave. Please try again.')
   }
-  
-  await updateLeaveBalanceUsed(
-    leave.user_id,
-    leave.type,
-    leave.days,
-    leave.start_date,
-    supabase
-  )
-  
-  const { data: user } = await supabase
-    .from('users')
-    .select('name')
-    .eq('id', updated.user_id)
+
+  if (!result.success) {
+    const errorCode = result.error as string
+    const message = result.message as string | undefined
+
+    switch (errorCode) {
+      case 'LEAVE_NOT_FOUND':
+        throw new Error('Leave request not found.')
+      case 'ALREADY_PROCESSED':
+        throw new Error('This leave request has already been processed.')
+      case 'SELF_APPROVAL_NOT_ALLOWED':
+        throw new Error('Cannot approve your own leave requests.')
+      case 'NO_BALANCE_FOUND':
+        throw new Error(message || 'No leave balance found. Please allocate balance first.')
+      case 'INSUFFICIENT_BALANCE':
+        throw new Error(message || 'Insufficient leave balance.')
+      case 'INVALID_LEAVE_TYPE':
+        throw new Error('Invalid leave type.')
+      default:
+        throw new Error(message || 'Failed to approve leave.')
+    }
+  }
+
+  const { data: updated } = await supabase
+    .from('leaves')
+    .select('*, user:users!user_id(name)')
+    .eq('id', id)
     .single()
-  
+
+  if (!updated) {
+    throw new Error('Leave approved but failed to fetch updated record.')
+  }
+
   return {
     id: updated.id,
     employeeId: updated.user_id,
-    employeeName: user?.name || '',
+    employeeName: updated.user?.name || '',
     type: updated.type,
     startDate: new Date(updated.start_date),
     endDate: new Date(updated.end_date),
@@ -519,57 +486,50 @@ export async function rejectLeave(id: string, approverId: string, reason: string
 
 export async function cancelLeave(id: string, userId: string): Promise<Leave> {
   const supabase = await createAdminClient()
-  
-  const { data: leave, error: fetchError } = await supabase
-    .from('leaves')
-    .select('*')
-    .eq('id', id)
-    .is('deleted_at', null)
-    .single()
-  
-  if (fetchError || !leave) {
-    throw new Error('Leave not found')
-  }
-  
-  if (leave.status !== 'approved') {
-    throw new Error('Only approved leaves can be cancelled')
-  }
-  
-  const { data: updated, error } = await supabase
-    .from('leaves')
-    .update({
-      status: 'cancelled',
-      cancelled_by: userId,
-      cancelled_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single()
-  
+
+  const { data: result, error } = await supabase.rpc('cancel_leave_atomic', {
+    p_leave_id: id,
+    p_cancelled_by: userId,
+  })
+
   if (error) {
-    console.error('Error cancelling leave:', error)
-    throw error
+    console.error('Atomic leave cancellation failed:', error)
+    throw new Error('Failed to cancel leave. Please try again.')
   }
-  
-  await revertLeaveBalanceUsed(
-    leave.user_id,
-    leave.type,
-    leave.days,
-    leave.start_date,
-    leave.balance_month || new Date(leave.start_date).getMonth() + 1,
-    supabase
-  )
-  
-  const { data: user } = await supabase
-    .from('users')
-    .select('name')
-    .eq('id', updated.user_id)
+
+  if (!result.success) {
+    const errorCode = result.error as string
+    const message = result.message as string | undefined
+
+    switch (errorCode) {
+      case 'LEAVE_NOT_FOUND':
+        throw new Error('Leave request not found.')
+      case 'NOT_APPROVED':
+        throw new Error(message || 'Only approved leaves can be cancelled.')
+      default:
+        throw new Error(message || 'Failed to cancel leave.')
+    }
+  }
+
+  // Warn if balance wasn't restored (orphaned data scenario)
+  if (result.warning === 'BALANCE_NOT_FOUND') {
+    console.warn('Leave cancelled but balance not restored:', result.message)
+  }
+
+  const { data: updated } = await supabase
+    .from('leaves')
+    .select('*, user:users!user_id(name)')
+    .eq('id', id)
     .single()
-  
+
+  if (!updated) {
+    throw new Error('Leave cancelled but failed to fetch updated record.')
+  }
+
   return {
     id: updated.id,
     employeeId: updated.user_id,
-    employeeName: user?.name || '',
+    employeeName: updated.user?.name || '',
     type: updated.type,
     startDate: new Date(updated.start_date),
     endDate: new Date(updated.end_date),
@@ -747,7 +707,15 @@ async function revertLeaveBalanceUsed(
   })
 
   if (error) {
-    console.error('Atomic leave balance revert failed:', error)
+    console.error('CRITICAL: Leave balance revert failed:', {
+      employeeId,
+      type,
+      days,
+      year,
+      month,
+      error,
+    })
+    throw new Error(`Failed to restore leave balance: ${error.message}`)
   }
 }
 
