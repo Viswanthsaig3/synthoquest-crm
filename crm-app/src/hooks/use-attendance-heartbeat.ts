@@ -71,7 +71,7 @@ export function useAttendanceHeartbeat(
   }, [getAuthHeaders])
 
   const sendHeartbeat = useCallback(async (): Promise<void> => {
-    if (!isCheckedInRef.current || !isActiveRef.current) return
+    if (!isCheckedInRef.current) return
 
     const now = new Date()
     const lastHeartbeat = lastHeartbeatRef.current
@@ -166,7 +166,9 @@ export function useAttendanceHeartbeat(
 
     const handleVisibilityChange = () => {
       isActiveRef.current = document.visibilityState === 'visible'
-      if (isActiveRef.current && isCheckedIn) {
+      // Send an immediate heartbeat when the tab becomes visible again
+      // but do NOT block scheduled heartbeats when tab is hidden
+      if (document.visibilityState === 'visible' && isCheckedIn) {
         sendHeartbeat()
       }
     }

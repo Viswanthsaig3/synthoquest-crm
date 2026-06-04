@@ -10,6 +10,7 @@ import { ToastProvider } from '@/components/ui/toast'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { hasPermission, isWorkOnlyUser } from '@/lib/client-permissions'
 import { BugReportButton } from '@/components/bugs/bug-report-button'
+import { AttendanceProvider } from '@/context/attendance-context'
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -72,29 +73,31 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ToastProvider>
-      <WorkOnlyRedirectToast />
-      <div className="flex h-screen min-h-0 bg-background">
-        <Sidebar />
-        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-          <SheetContent side="left" className="w-[min(100vw-1rem,20rem)] p-0 flex flex-col">
-            <SheetTitle className="sr-only">Main navigation</SheetTitle>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-r bg-card">
-              <div className="border-b p-4">
-                <p className="text-lg font-bold text-primary">SynthoQuest</p>
+      <AttendanceProvider>
+        <WorkOnlyRedirectToast />
+        <div className="flex h-screen min-h-0 bg-background">
+          <Sidebar />
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <SheetContent side="left" className="w-[min(100vw-1rem,20rem)] p-0 flex flex-col">
+              <SheetTitle className="sr-only">Main navigation</SheetTitle>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-r bg-card">
+                <div className="border-b p-4">
+                  <p className="text-lg font-bold text-primary">SynthoQuest</p>
+                </div>
+                <SidebarNavPanel
+                  variant="drawer"
+                  onNavigate={() => setMobileNavOpen(false)}
+                />
               </div>
-              <SidebarNavPanel
-                variant="drawer"
-                onNavigate={() => setMobileNavOpen(false)}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <Header onMobileMenuOpen={() => setMobileNavOpen(true)} />
-          <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+            </SheetContent>
+          </Sheet>
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <Header onMobileMenuOpen={() => setMobileNavOpen(true)} />
+            <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+          </div>
+          <BugReportButton />
         </div>
-        <BugReportButton />
-      </div>
+      </AttendanceProvider>
     </ToastProvider>
   )
 }

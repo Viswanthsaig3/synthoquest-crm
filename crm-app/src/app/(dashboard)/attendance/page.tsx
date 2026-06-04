@@ -16,10 +16,10 @@ import {
 } from '@/components/ui/dialog'
 import { formatDate, formatTime } from '@/lib/utils'
 import { AlertCircle, Clock, Loader2, LogIn, LogOut, Activity, MapPin, RefreshCw, ExternalLink, Settings } from 'lucide-react'
-import type { AttendanceRecord, TodayAttendanceSummary } from '@/types/time-entry'
+import type { AttendanceRecord } from '@/types/time-entry'
 import { fetchWithAccessTokenRefresh } from '@/lib/api/auth-fetch'
 import { getCurrentPositionForAttendance } from '@/lib/client-geolocation'
-import { useAttendanceHeartbeat } from '@/hooks/use-attendance-heartbeat'
+import { useAttendance } from '@/context/attendance-context'
 import Link from 'next/link'
 
 interface UserLocation {
@@ -45,10 +45,18 @@ interface HomeLocation {
 
 export default function AttendancePage() {
   const { toast } = useToast()
-  const [loading, setLoading] = useState(true)
-  const [summary, setSummary] = useState<TodayAttendanceSummary | null>(null)
+  const {
+    summary,
+    openSession,
+    isCheckedIn,
+    loading: attendanceLoading,
+    showAutoCheckoutAlert,
+    dismissAutoCheckoutAlert,
+    refreshAttendance,
+  } = useAttendance()
+
+  const [locationsLoading, setLocationsLoading] = useState(true)
   const [tick, setTick] = useState(0)
-  const [showAutoCheckoutAlert, setShowAutoCheckoutAlert] = useState(false)
   const [showCheckInSuccessDialog, setShowCheckInSuccessDialog] = useState(false)
   const [userLocation, setUserLocation] = useState<UserLocation>({
     latitude: null,
@@ -71,17 +79,25 @@ export default function AttendancePage() {
     inRadius: boolean | null
   }>({ toOffice: null, toHome: null, nearest: null, inRadius: null })
 
-  const fetchData = useCallback(async () => {
+  // Show toast when auto-checkout alert fires
+  useEffect(() => {
+    if (showAutoCheckoutAlert) {
+      toast({
+        title: 'Session ended',
+        description: 'You were automatically checked out due to inactivity.',
+        variant: 'destructive',
+      })
+    }
+  }, [showAutoCheckoutAlert, toast])
+
+  // Fetch office and home locations on mount
+  const fetchLocations = useCallback(async () => {
     try {
-      setLoading(true)
-      const [attRes, officeRes, homeRes] = await Promise.all([
-        fetchWithAccessTokenRefresh('/api/attendance/today'),
+      setLocationsLoading(true)
+      const [officeRes, homeRes] = await Promise.all([
         fetchWithAccessTokenRefresh('/api/attendance/office-location'),
         fetchWithAccessTokenRefresh('/api/settings/home-location'),
       ])
-      
-      const attData = await attRes.json()
-      setSummary(attData.data || null)
       
       if (officeRes.ok) {
         const officeData = await officeRes.json()
@@ -98,15 +114,15 @@ export default function AttendancePage() {
         setHomeLocation(homeData.data || null)
       }
     } catch (error) {
-      console.error('Error fetching attendance:', error)
+      console.error('Error fetching locations:', error)
     } finally {
-      setLoading(false)
+      setLocationsLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    fetchLocations()
+  }, [fetchLocations])
 
   const calculateDistance = useCallback((lat1: number, lng1: number, lat2: number, lng2: number): number => {
     const R = 6371000
@@ -159,29 +175,7 @@ export default function AttendancePage() {
     }
   }, [userLocation, officeLocation, homeLocation, calculateDistance])
 
-  const openSession = summary?.openSession ?? null
-  const isCheckedIn = Boolean(openSession)
-
-  const handleAutoCheckout = useCallback(() => {
-    setShowAutoCheckoutAlert(true)
-    toast({
-      title: 'Session ended',
-      description: 'You were automatically checked out due to inactivity.',
-      variant: 'destructive',
-    })
-    fetchData()
-  }, [fetchData, toast])
-
-  const handleHeartbeatError = useCallback((error: Error) => {
-    console.error('[Heartbeat] Error in hook:', error)
-  }, [])
-
-  useAttendanceHeartbeat({
-    isCheckedIn,
-    sessionId: openSession?.id,
-    onAutoCheckout: handleAutoCheckout,
-    onError: handleHeartbeatError,
-  })
+  const loading = attendanceLoading || locationsLoading
 
   useEffect(() => {
     if (!openSession?.checkInTime) return
@@ -297,7 +291,8 @@ export default function AttendancePage() {
         })
       }
 
-      fetchData()
+      // Refresh the global attendance context so heartbeat starts/stops
+      await refreshAttendance()
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Attendance action failed'
       toast({
@@ -638,7 +633,7 @@ export default function AttendancePage() {
                 variant="outline"
                 size="sm"
                 className="mt-2"
-                onClick={() => setShowAutoCheckoutAlert(false)}
+                onClick={dismissAutoCheckoutAlert}
               >
                 Dismiss
               </Button>
