@@ -18,6 +18,7 @@ import {
 
 import { PAYMENT_STATUSES, PAYMENT_METHODS, COURSES } from '@/lib/constants'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { exportToCSV, formatCurrencyForExport, formatDateForExport } from '@/lib/utils/export'
 import { canViewAllPayments, canViewAssignedPayments, canCreatePayment } from '@/lib/permissions'
 import { CreditCard, Eye, Download, Plus, IndianRupee, Calendar } from 'lucide-react'
 import Link from 'next/link'
@@ -28,6 +29,7 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [methodFilter, setMethodFilter] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   if (!user) return null
 
@@ -52,6 +54,37 @@ export default function PaymentsPage() {
     return colors[status] || 'bg-gray-100 text-gray-800'
   }
 
+  const handleExport = async () => {
+    if (filteredPayments.length === 0) {
+      return
+    }
+    setExporting(true)
+    try {
+      const exportData = filteredPayments.map(payment => ({
+        receiptNumber: payment.receiptNumber,
+        studentName: payment.studentName,
+        courseName: payment.courseName,
+        batchName: payment.batchName || '',
+        amount: formatCurrencyForExport(payment.amount),
+        method: payment.method.replace('_', ' '),
+        status: payment.status,
+        date: formatDateForExport(payment.paidAt || payment.createdAt),
+      }))
+      exportToCSV(exportData, 'payments', [
+        { key: 'receiptNumber', label: 'Receipt Number' },
+        { key: 'studentName', label: 'Student' },
+        { key: 'courseName', label: 'Course' },
+        { key: 'batchName', label: 'Batch' },
+        { key: 'amount', label: 'Amount' },
+        { key: 'method', label: 'Payment Method' },
+        { key: 'status', label: 'Status' },
+        { key: 'date', label: 'Date' },
+      ])
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <PermissionGuard check={(u) => canViewAllPayments(u) || canViewAssignedPayments(u)} fallbackMessage="You don't have permission to view payments.">
       <div className="space-y-6">
@@ -66,7 +99,7 @@ export default function PaymentsPage() {
           { options: PAYMENT_STATUSES, value: statusFilter, onChange: setStatusFilter, placeholder: 'All Statuses' },
           { options: PAYMENT_METHODS, value: methodFilter, onChange: setMethodFilter, placeholder: 'All Methods' },
         ]}
-        exportData
+exportData={{ onClick: handleExport, loading: exporting }}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

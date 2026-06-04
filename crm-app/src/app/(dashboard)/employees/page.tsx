@@ -20,6 +20,7 @@ import { getEmployees, deleteEmployee } from '@/lib/api/employees'
 import { getRoles } from '@/lib/api/roles'
 import { getDepartments } from '@/lib/api/departments'
 import { formatDate, getInitials, getErrorMessage } from '@/lib/utils'
+import { exportToCSV, formatDateForExport } from '@/lib/utils/export'
 import { canViewEmployees, canManageEmployees, canManageAssignedEmployees } from '@/lib/permissions'
 import { Users, Eye, Edit, Mail, Phone, Calendar, Loader2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
@@ -33,6 +34,7 @@ export default function EmployeesPage() {
   const [departmentFilter, setDepartmentFilter] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [employees, setEmployees] = useState<User[]>([])
   const [roleOptions, setRoleOptions] = useState<Array<{ value: string; label: string }>>([])
   const [departmentOptions, setDepartmentOptions] = useState<Array<{ value: string; label: string }>>([])
@@ -111,6 +113,36 @@ export default function EmployeesPage() {
     }
   }
 
+  const handleExport = async () => {
+    if (employees.length === 0) {
+      toast({ title: 'No Data', description: 'No employees to export', variant: 'destructive' })
+      return
+    }
+    setExporting(true)
+    try {
+      const exportData = employees.map(employee => ({
+        name: employee.name,
+        email: employee.email,
+        phone: employee.phone,
+        department: employee.department,
+        role: employee.role.replace('_', ' '),
+        status: employee.status,
+        joinDate: employee.joinDate ? formatDateForExport(employee.joinDate) : '',
+      }))
+      exportToCSV(exportData, 'employees', [
+        { key: 'name', label: 'Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'department', label: 'Department' },
+        { key: 'role', label: 'Role' },
+        { key: 'status', label: 'Status' },
+        { key: 'joinDate', label: 'Join Date' },
+      ])
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (!user) return null
 
   const canAdd = canManageEmployees(user)
@@ -131,7 +163,7 @@ export default function EmployeesPage() {
             { options: departmentOptions, value: departmentFilter, onChange: setDepartmentFilter, placeholder: 'All Departments' },
             { options: roleOptions, value: roleFilter, onChange: setRoleFilter, placeholder: 'All Roles' },
           ]}
-          exportData
+exportData={{ onClick: handleExport, loading: exporting }}
         />
 
         <Card>

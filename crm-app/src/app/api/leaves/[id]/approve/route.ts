@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { approveLeave, getLeaveById } from '@/lib/db/queries/leaves'
-import { hasPermission, isAdmin } from '@/lib/auth/authorization'
+import { hasPermission, isAdminOrHR } from '@/lib/auth/authorization'
 import { createAdminClient } from '@/lib/db/server-client'
 
 export async function POST(
@@ -35,7 +35,7 @@ export async function POST(
         )
       }
       
-      if (!isAdmin(user)) {
+      if (!isAdminOrHR(user)) {
         const supabase = await createAdminClient()
         const { data: employee } = await supabase
           .from('users')

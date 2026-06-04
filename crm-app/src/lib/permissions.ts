@@ -86,6 +86,10 @@ type Permission =
   | 'bugs.delete_screenshot'
   | 'settings.manage'
   | 'departments.manage'
+  | 'courses.view'
+  | 'courses.create'
+  | 'courses.edit'
+  | 'courses.delete'
 
 function listPermissions(user: User): string[] {
   return Array.isArray(user.permissions) ? user.permissions : []
@@ -429,6 +433,35 @@ export function canManageLeadTypes(user: User): boolean {
 
 export function canManageRoles(user: User): boolean {
   return hasPermissionStatic(user, 'roles.manage')
+}
+
+export function canViewCourses(user: User): boolean {
+  return hasPermissionStatic(user, 'courses.view') ||
+         hasPermissionStatic(user, 'courses.create') ||
+         hasPermissionStatic(user, 'courses.edit')
+}
+
+export function canCreateCourse(user: User): boolean {
+  return hasPermissionStatic(user, 'courses.create')
+}
+
+export function canEditCourse(user: User): boolean {
+  return hasPermissionStatic(user, 'courses.edit')
+}
+
+export function canDeleteCourse(user: User): boolean {
+  return hasPermissionStatic(user, 'courses.delete')
+}
+
+export function canManageCourses(user: User): boolean {
+  return hasPermissionStatic(user, 'courses.create') ||
+         hasPermissionStatic(user, 'courses.edit') ||
+         hasPermissionStatic(user, 'courses.delete')
+}
+
+export function canManageStudentPayments(user: User): boolean {
+  return hasPermissionStatic(user, 'payments.create') ||
+         hasPermissionStatic(user, 'payments.process')
 }
 
 export function getTeamMemberIds(managerId: string, users: User[]): string[] {

@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState, useEffect } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -10,23 +10,27 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { LEAD_SOURCES } from '@/lib/constants'
-import { canCreateStudent } from '@/lib/permissions'
+import { canEditStudent } from '@/lib/permissions'
 import { ArrowLeft, Save, Loader2 } from 'lucide-react'
 import Link from 'next/link'
-import { createStudent } from '@/lib/api/students'
+import { getStudentById, updateStudent } from '@/lib/api/students'
 import { useToast } from '@/components/ui/toast'
 import { AutocompleteInput } from '@/components/ui/autocomplete-input'
+import type { Student } from '@/types/student'
 
 const STUDENT_TYPES = [
   { value: 'current', label: 'Current Student' },
   { value: 'passed_out', label: 'Passed Out' },
 ]
 
-export default function NewStudentPage() {
+export default function EditStudentPage() {
+  const params = useParams()
   const router = useRouter()
   const { user } = useAuth()
   const { toast } = useToast()
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [student, setStudent] = useState<Student | null>(null)
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -47,13 +51,77 @@ export default function NewStudentPage() {
     notes: '',
   })
 
-  if (!user || !canCreateStudent(user)) {
+  useEffect(() => {
+    loadStudent()
+  }, [params.id])
+
+  const loadStudent = async () => {
+    try {
+      setLoading(true)
+      const res = await getStudentById(params.id as string)
+      setStudent(res.data)
+      if (res.data) {
+        setFormData({
+          name: res.data.name,
+          email: res.data.email,
+          phone: res.data.phone,
+          alternatePhone: res.data.alternatePhone || '',
+          qualification: res.data.qualification || '',
+          college: res.data.college || '',
+          graduationYear: res.data.graduationYear || '',
+          studentType: res.data.studentType || 'passed_out',
+          occupation: res.data.occupation || '',
+          company: res.data.company || '',
+          experience: res.data.experience || '',
+          address: res.data.address || '',
+          city: res.data.city || '',
+          state: res.data.state || '',
+          pincode: res.data.pincode || '',
+          source: res.data.source,
+          notes: res.data.notes || '',
+        })
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to load student', variant: 'destructive' })
+      router.push('/students')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!user || !canEditStudent(user)) {
     return (
       <div className="space-y-6">
         <Breadcrumb />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">You don&apos;t have permission to create students.</p>
+            <p className="text-muted-foreground">You don&apos;t have permission to edit students.</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!student) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumb />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted-foreground">Student not found.</p>
           </CardContent>
         </Card>
       </div>
@@ -62,19 +130,19 @@ export default function NewStudentPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
+    setSaving(true)
 
     try {
-      await createStudent({
+      await updateStudent(student.id, {
         ...formData,
         studentType: formData.studentType as 'current' | 'passed_out',
       })
-      toast({ title: 'Student created', description: `${formData.name} has been added.` })
-      router.push('/students')
+      toast({ title: 'Student updated', description: `${formData.name} has been updated.` })
+      router.push(`/students/${student.id}`)
     } catch (error: any) {
-      toast({ title: 'Error', description: error.message || 'Failed to create student', variant: 'destructive' })
+      toast({ title: 'Error', description: error.message || 'Failed to update student', variant: 'destructive' })
     } finally {
-      setLoading(false)
+      setSaving(false)
     }
   }
 
@@ -83,14 +151,14 @@ export default function NewStudentPage() {
       <Breadcrumb />
 
       <div className="flex items-center gap-4">
-        <Link href="/students">
+        <Link href={`/students/${student.id}`}>
           <Button variant="ghost" size="icon">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
         <div>
-          <h1 className="text-2xl font-bold">Add New Student</h1>
-          <p className="text-muted-foreground">Create a new student record</p>
+          <h1 className="text-2xl font-bold">Edit Student</h1>
+          <p className="text-muted-foreground">{student.name}</p>
         </div>
       </div>
 
@@ -99,7 +167,7 @@ export default function NewStudentPage() {
           <Card>
             <CardHeader>
               <CardTitle>Personal Information</CardTitle>
-              <CardDescription>Basic student details</CardDescription>
+              <CardDescription>Update student details</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -108,7 +176,6 @@ export default function NewStudentPage() {
                   id="name"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Enter full name"
                   required
                 />
               </div>
@@ -120,7 +187,6 @@ export default function NewStudentPage() {
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="Enter email address"
                   required
                 />
               </div>
@@ -132,7 +198,6 @@ export default function NewStudentPage() {
                     id="phone"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="Primary phone"
                     required
                   />
                 </div>
@@ -142,7 +207,6 @@ export default function NewStudentPage() {
                     id="alternatePhone"
                     value={formData.alternatePhone}
                     onChange={(e) => setFormData({ ...formData, alternatePhone: e.target.value })}
-                    placeholder="Alternate phone"
                   />
                 </div>
               </div>
@@ -154,41 +218,38 @@ export default function NewStudentPage() {
                   value={formData.qualification}
                   onChange={(val) => setFormData({ ...formData, qualification: val })}
                   fieldType="qualification"
-                  placeholder="e.g., B.Tech, B.Sc, MCA"
+                  placeholder="e.g., B.Tech, B.Sc"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="college">College / University *</Label>
+                <Label htmlFor="college">College / University</Label>
                 <AutocompleteInput
                   id="college"
                   value={formData.college}
                   onChange={(val) => setFormData({ ...formData, college: val })}
                   fieldType="college"
-                  placeholder="e.g., JNTU Hyderabad, Osmania University"
-                  required
+                  placeholder="e.g., JNTU Hyderabad"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="graduationYear">Graduation Year *</Label>
+                  <Label htmlFor="graduationYear">Graduation Year</Label>
                   <Input
                     id="graduationYear"
                     value={formData.graduationYear}
                     onChange={(e) => setFormData({ ...formData, graduationYear: e.target.value })}
-                    placeholder="e.g., 2024, 2025"
-                    required
+                    placeholder="e.g., 2024"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="studentType">Student Type *</Label>
+                  <Label htmlFor="studentType">Student Type</Label>
                   <select
                     id="studentType"
                     value={formData.studentType}
                     onChange={(e) => setFormData({ ...formData, studentType: e.target.value })}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    required
                   >
                     {STUDENT_TYPES.map((s) => (
                       <option key={s.value} value={s.value}>{s.label}</option>
@@ -205,20 +266,18 @@ export default function NewStudentPage() {
                     value={formData.occupation}
                     onChange={(val) => setFormData({ ...formData, occupation: val })}
                     fieldType="occupation"
-                    placeholder="Current occupation"
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="company">Company</Label>
-                  <AutocompleteInput
-                    id="company"
-                    value={formData.company}
-                    onChange={(val) => setFormData({ ...formData, company: val })}
-                    fieldType="company"
-                    placeholder="Current company"
-                  />
-                </div>
-              </div>
+</div>
+                 <div className="space-y-2">
+                   <Label htmlFor="company">Company</Label>
+                   <AutocompleteInput
+                     id="company"
+                     value={formData.company}
+                     onChange={(val) => setFormData({ ...formData, company: val })}
+                     fieldType="company"
+                   />
+                 </div>
+               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="experience">Years of Experience</Label>
@@ -244,7 +303,6 @@ export default function NewStudentPage() {
                   id="address"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Street address"
                   rows={2}
                 />
               </div>
@@ -256,7 +314,6 @@ export default function NewStudentPage() {
                     id="city"
                     value={formData.city}
                     onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    placeholder="City"
                   />
                 </div>
                 <div className="space-y-2">
@@ -265,7 +322,6 @@ export default function NewStudentPage() {
                     id="state"
                     value={formData.state}
                     onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                    placeholder="State"
                   />
                 </div>
                 <div className="space-y-2">
@@ -274,7 +330,6 @@ export default function NewStudentPage() {
                     id="pincode"
                     value={formData.pincode}
                     onChange={(e) => setFormData({ ...formData, pincode: e.target.value })}
-                    placeholder="Pincode"
                   />
                 </div>
               </div>
@@ -299,7 +354,6 @@ export default function NewStudentPage() {
                   id="notes"
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Additional notes about the student"
                   rows={3}
                 />
               </div>
@@ -308,19 +362,19 @@ export default function NewStudentPage() {
         </div>
 
         <div className="flex justify-end gap-4 mt-6">
-          <Link href="/students">
+          <Link href={`/students/${student.id}`}>
             <Button type="button" variant="outline">Cancel</Button>
           </Link>
-          <Button type="submit" disabled={loading}>
-            {loading ? (
+          <Button type="submit" disabled={saving}>
+            {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Creating...
+                Saving...
               </>
             ) : (
               <>
                 <Save className="mr-2 h-4 w-4" />
-                Create Student
+                Save Changes
               </>
             )}
           </Button>

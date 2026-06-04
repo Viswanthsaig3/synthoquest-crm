@@ -71,8 +71,8 @@ const navGroups: NavGroup[] = [
       { href: '/leads/mine', label: 'My Leads', icon: Phone, permissionsAny: ['leads.view_assigned', 'leads.claim'] },
       { href: '/leads', label: 'Leads', icon: Users, permissionsAny: ['leads.view_all'] },
       { href: '/leads/new', label: 'New Lead', icon: Plus, permissionsAny: ['leads.create'] },
-      { href: '/students', label: 'Students', icon: GraduationCap, permissionsAny: ['students.view_all', 'students.view_assigned'] },
       { href: '/interns', label: 'Interns', icon: Briefcase, permissionsAny: ['interns.view_all', 'interns.view_assigned', 'interns.manage_all', 'interns.manage_assigned'] },
+      { href: '/students', label: 'Students', icon: GraduationCap, permissionsAny: ['students.view_all', 'students.view_assigned'] },
     ],
   },
   {
@@ -80,7 +80,7 @@ const navGroups: NavGroup[] = [
     label: 'Operations',
     icon: BookOpen,
     items: [
-      { href: '/batches', label: 'Batches', icon: BookOpen, permissionsAny: ['batches.view'] },
+      { href: '/courses', label: 'Courses', icon: BookOpen, permissionsAny: ['courses.view', 'courses.create'] },
       { href: '/payments', label: 'Payments', icon: CreditCard, permissionsAny: ['payments.view_all', 'payments.view_assigned'] },
       { href: '/certificates', label: 'Certificates', icon: Award, permissionsAny: ['certificates.view_all'] },
     ],

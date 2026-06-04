@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/context/auth-context'
 import { Breadcrumb } from '@/components/layout/breadcrumb'
 import { PageHeader, StatusBadge, EmptyState, TableSkeleton, PermissionGuard } from '@/components/shared'
@@ -17,41 +17,133 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-import { STUDENT_STATUSES, COURSES } from '@/lib/constants'
+import { STUDENT_STATUSES } from '@/lib/constants'
 import { formatDate, getInitials, formatCurrency } from '@/lib/utils'
-import { canViewAllStudents, canViewAssignedStudents, canCreateStudent } from '@/lib/permissions'
-import { GraduationCap, Eye, Mail, Phone, BookOpen, IndianRupee, Calendar } from 'lucide-react'
+import { canViewAllStudents, canViewAssignedStudents, canCreateStudent, canDeleteStudent } from '@/lib/permissions'
+import { GraduationCap, Eye, Mail, Phone, BookOpen, IndianRupee, Calendar, Loader2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { getStudents, deleteStudent } from '@/lib/api/students'
+import { getCourses } from '@/lib/api/courses'
+import { useToast } from '@/components/ui/toast'
+import { exportToCSV, formatCurrencyForExport, formatDateForExport } from '@/lib/utils/export'
 import type { Student, Enrollment } from '@/types/student'
+import type { Course } from '@/types/course'
 
 export default function StudentsPage() {
   const { user } = useAuth()
+  const { toast } = useToast()
+  const [loading, setLoading] = useState(true)
+  const [students, setStudents] = useState<Student[]>([])
+  const [courses, setCourses] = useState<Course[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [courseFilter, setCourseFilter] = useState('')
+  const [exporting, setExporting] = useState(false)
 
-  const visibleStudents: Student[] = useMemo(() => {
-    if (!user) return []
-    return canViewAllStudents(user) ? [] : []
+  useEffect(() => {
+    if (user) {
+      loadData()
+    }
   }, [user])
 
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      const [studentsRes, coursesRes] = await Promise.all([
+        getStudents(),
+        getCourses()
+      ])
+      setStudents(studentsRes.data)
+      setCourses(coursesRes.data)
+    } catch (error) {
+      console.error('Failed to load students:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load students',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const filteredStudents = useMemo(() => {
-    return visibleStudents.filter(student => {
+    return students.filter(student => {
       const matchesSearch = student.name.toLowerCase().includes(search.toLowerCase()) ||
         student.email.toLowerCase().includes(search.toLowerCase()) ||
         student.phone.includes(search)
       const matchesStatus = !statusFilter || student.status === statusFilter
-      const matchesCourse = !courseFilter || student.enrollments.some((e: Enrollment) => e.courseName === courseFilter)
+      const matchesCourse = !courseFilter || student.enrollments.some((e: Enrollment) => e.courseId === courseFilter || e.courseName === courseFilter)
       return matchesSearch && matchesStatus && matchesCourse
     })
-  }, [visibleStudents, search, statusFilter, courseFilter])
+  }, [students, search, statusFilter, courseFilter])
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) return
+
+    try {
+      await deleteStudent(id)
+      toast({ title: 'Student deleted', description: `${name} has been removed.` })
+      loadData()
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to delete student', variant: 'destructive' })
+    }
+  }
+
+  const handleExport = async () => {
+    if (filteredStudents.length === 0) {
+      toast({ title: 'No data', description: 'No students to export' })
+      return
+    }
+
+    setExporting(true)
+    try {
+      const exportData = filteredStudents.map(s => ({
+        name: s.name,
+        email: s.email,
+        phone: s.phone,
+        college: s.college || '',
+        qualification: s.qualification || '',
+        graduationYear: s.graduationYear || '',
+        studentType: s.studentType === 'current' ? 'Current Student' : 'Passed Out',
+        courses: s.enrollments.map(e => e.courseName).join('; ') || '',
+        totalFee: formatCurrencyForExport(s.enrollments.reduce((sum, e) => sum + e.totalFee, 0)),
+        totalPaid: formatCurrencyForExport(s.totalPaid),
+        totalDue: formatCurrencyForExport(s.totalDue),
+        status: s.status,
+        enrolledDate: formatDateForExport(s.convertedAt || s.createdAt),
+      }))
+      
+      exportToCSV(exportData, 'students', [
+        { key: 'name', label: 'Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'college', label: 'College' },
+        { key: 'qualification', label: 'Qualification' },
+        { key: 'graduationYear', label: 'Graduation Year' },
+        { key: 'studentType', label: 'Student Type' },
+        { key: 'courses', label: 'Courses' },
+        { key: 'totalFee', label: 'Total Fee' },
+        { key: 'totalPaid', label: 'Paid' },
+        { key: 'totalDue', label: 'Due' },
+        { key: 'status', label: 'Status' },
+        { key: 'enrolledDate', label: 'Enrolled Date' },
+      ])
+      
+      toast({ title: 'Export complete', description: `${filteredStudents.length} students exported` })
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to export', variant: 'destructive' })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   if (!user) return null
 
   const canView = canViewAllStudents(user) || canViewAssignedStudents(user)
-
   const canAdd = canCreateStudent(user)
-  const courseOptions = COURSES.map(c => ({ value: c, label: c }))
+  const canDel = canDeleteStudent(user)
+  const courseOptions = courses.map(c => ({ value: c.id, label: c.name }))
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -77,16 +169,18 @@ export default function StudentsPage() {
             { options: STUDENT_STATUSES, value: statusFilter, onChange: setStatusFilter, placeholder: 'All Statuses' },
             { options: courseOptions, value: courseFilter, onChange: setCourseFilter, placeholder: 'All Courses' },
           ]}
-          exportData
+          exportData={{ onClick: handleExport, loading: exporting }}
         />
 
       <Card>
         <CardContent className="p-0">
-          {filteredStudents.length === 0 ? (
+          {loading ? (
+            <TableSkeleton rows={5} />
+          ) : filteredStudents.length === 0 ? (
             <EmptyState
               icon={GraduationCap}
               title="No students found"
-              description="Students will appear here after lead conversion."
+              description={students.length === 0 ? "Students will appear here after lead conversion." : "No students match your filters."}
             />
           ) : (
             <Table>
@@ -169,16 +263,28 @@ export default function StudentsPage() {
                       <TableCell className="text-sm text-muted-foreground">
                         <div className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
-                          {formatDate(student.convertedAt)}
+                          {student.convertedAt ? formatDate(student.convertedAt) : '-'}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Link href={`/students/${student.id}`}>
-                          <Button variant="ghost" size="icon">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </Link>
-                      </TableCell>
+<TableCell className="text-right">
+                         <div className="flex items-center gap-1 justify-end">
+                           <Link href={`/students/${student.id}`}>
+                             <Button variant="ghost" size="icon">
+                               <Eye className="h-4 w-4" />
+                             </Button>
+                           </Link>
+                           {canDel && (
+                             <Button
+                               variant="ghost"
+                               size="icon"
+                               className="text-red-600 hover:bg-red-50"
+                               onClick={() => handleDelete(student.id, student.name)}
+                             >
+                               <Trash2 className="h-4 w-4" />
+                             </Button>
+                           )}
+                         </div>
+                       </TableCell>
                     </TableRow>
                   )
                 })}

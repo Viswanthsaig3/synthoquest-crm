@@ -22,6 +22,7 @@ import { getLeads, getLeadTypes } from '@/lib/api/leads'
 import { getEmployees } from '@/lib/api/employees'
 import { LEAD_STATUSES, LEAD_PRIORITIES } from '@/lib/constants'
 import { formatDate, getInitials, cn } from '@/lib/utils'
+import { exportToCSV, formatDateForExport } from '@/lib/utils/export'
 import { canCreateLead, canEditLead, canDeleteLead, canViewAllLeads } from '@/lib/permissions'
 import { useToast } from '@/components/ui/toast'
 import type { Lead } from '@/lib/db/queries/leads'
@@ -52,6 +53,7 @@ export default function LeadsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [leads, setLeads] = useState<Lead[]>([])
   const [leadTypes, setLeadTypes] = useState<LeadType[]>([])
   const [employees, setEmployees] = useState<User[]>([])
@@ -134,6 +136,45 @@ export default function LeadsPage() {
     }
   }, [leads, studentTypeId, internTypeId])
 
+  const handleExport = async () => {
+    if (filteredLeads.length === 0) {
+      toast({ title: 'No Data', description: 'No leads to export', variant: 'destructive' })
+      return
+    }
+    setExporting(true)
+    try {
+      const exportData = filteredLeads.map(lead => {
+        const leadType = leadTypes.find(lt => lt.id === lead.typeId)
+        const status = leadType?.statuses.find(s => s.value === lead.typeStatus)
+        const assignedUser = getAssignedUser(lead.assignedTo)
+        return {
+          type: leadType?.name || '',
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          status: status?.label || lead.typeStatus || lead.status,
+          priority: lead.priority,
+          source: lead.typeSource || lead.source,
+          assignedTo: assignedUser?.name || 'Unassigned',
+          createdAt: formatDateForExport(lead.createdAt),
+        }
+      })
+      exportToCSV(exportData, 'leads', [
+        { key: 'type', label: 'Type' },
+        { key: 'name', label: 'Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'status', label: 'Status' },
+        { key: 'priority', label: 'Priority' },
+        { key: 'source', label: 'Source' },
+        { key: 'assignedTo', label: 'Assigned To' },
+        { key: 'createdAt', label: 'Created Date' },
+      ])
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (!user) return null
 
   const showCreateButton = canCreateLead(user)
@@ -165,7 +206,7 @@ export default function LeadsPage() {
           { options: getStatusOptions(), value: statusFilter, onChange: setStatusFilter, placeholder: 'All Status' },
           { options: priorityOptions, value: priorityFilter, onChange: setPriorityFilter, placeholder: 'All Priority' },
         ]}
-        exportData
+exportData={{ onClick: handleExport, loading: exporting }}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

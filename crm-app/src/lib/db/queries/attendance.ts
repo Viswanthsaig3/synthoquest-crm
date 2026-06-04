@@ -159,7 +159,7 @@ export async function checkIn(
 
   const policy = enforcementPolicy || {
     blockOnVerificationFailure: true,
-    maxIpGpsDistanceKm: 50,
+    maxIpGpsDistanceKm: 500,
     minGpsPrecisionMeters: 5,
   }
 

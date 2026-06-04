@@ -6,6 +6,14 @@ import { AttendanceSubNav } from '@/components/attendance/attendance-subnav'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/toast'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { formatDate, formatTime } from '@/lib/utils'
 import { AlertCircle, Clock, Loader2, LogIn, LogOut, Activity, MapPin, RefreshCw, ExternalLink, Settings } from 'lucide-react'
 import type { AttendanceRecord, TodayAttendanceSummary } from '@/types/time-entry'
@@ -41,6 +49,7 @@ export default function AttendancePage() {
   const [summary, setSummary] = useState<TodayAttendanceSummary | null>(null)
   const [tick, setTick] = useState(0)
   const [showAutoCheckoutAlert, setShowAutoCheckoutAlert] = useState(false)
+  const [showCheckInSuccessDialog, setShowCheckInSuccessDialog] = useState(false)
   const [userLocation, setUserLocation] = useState<UserLocation>({
     latitude: null,
     longitude: null,
@@ -273,11 +282,13 @@ export default function AttendancePage() {
             title: 'Checked in',
             description: `You are ${session.lateByMinutes} minutes late. Location: ${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`,
           })
+          setShowCheckInSuccessDialog(true)
         } else {
           toast({
             title: 'Checked in successfully',
             description: `Location: ${loc.latitude.toFixed(4)}, ${loc.longitude.toFixed(4)}`,
           })
+          setShowCheckInSuccessDialog(true)
         }
       } else {
         toast({
@@ -687,6 +698,48 @@ export default function AttendancePage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={showCheckInSuccessDialog} onOpenChange={setShowCheckInSuccessDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LogIn className="h-5 w-5 text-green-600" />
+              Checked In Successfully
+            </DialogTitle>
+            <DialogDescription>
+              Your attendance session has started. Follow these tips to avoid auto-checkout:
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
+              <Activity className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-green-800">Keep this browser tab open</p>
+                <p className="text-sm text-green-700">Closing the tab or browser will stop the heartbeat and trigger auto-checkout after 30 minutes of inactivity.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <MapPin className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-blue-800">Stay in allowed radius</p>
+                <p className="text-sm text-blue-700">Your location is verified periodically. Moving outside office/home radius may trigger warnings.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+              <Clock className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-amber-800">Remember to check out</p>
+                <p className="text-sm text-amber-700">Click &quot;Check Out&quot; before leaving for the day. Sessions auto-checkout after 12 hours max.</p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowCheckInSuccessDialog(false)} className="w-full">
+              Got it, start working
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

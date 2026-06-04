@@ -12,6 +12,7 @@ import { Progress } from '@/components/ui/progress'
 import { BATCH_STATUSES, BATCH_MODES, COURSES } from '@/lib/constants'
 import type { Batch, BatchSchedule } from '@/types/batch'
 import { formatDate, cn } from '@/lib/utils'
+import { exportToCSV, formatCurrencyForExport, formatDateForExport } from '@/lib/utils/export'
 import { canCreateBatch, canViewBatches } from '@/lib/permissions'
 import { BookOpen, Users, Calendar, Clock, MapPin, Video, Plus, Eye } from 'lucide-react'
 import Link from 'next/link'
@@ -21,6 +22,7 @@ export default function BatchesPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [courseFilter, setCourseFilter] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   const filteredBatches: Batch[] = []
 
@@ -47,6 +49,47 @@ export default function BatchesPage() {
     }
   }
 
+  const handleExport = async () => {
+    if (filteredBatches.length === 0) {
+      return
+    }
+    setExporting(true)
+    try {
+      const exportData = filteredBatches.map(batch => ({
+        name: batch.name,
+        courseName: batch.courseName,
+        instructorName: batch.instructorName,
+        mode: batch.mode,
+        venue: batch.venue || '',
+        startDate: formatDateForExport(batch.startDate),
+        endDate: formatDateForExport(batch.endDate),
+        enrolledCount: batch.enrolledCount,
+        maxCapacity: batch.maxCapacity,
+        availableSeats: batch.availableSeats,
+        fee: formatCurrencyForExport(batch.fee),
+        discount: batch.discount ? formatCurrencyForExport(batch.discount) : '',
+        status: batch.status,
+      }))
+      exportToCSV(exportData, 'batches', [
+        { key: 'name', label: 'Batch Name' },
+        { key: 'courseName', label: 'Course' },
+        { key: 'instructorName', label: 'Instructor' },
+        { key: 'mode', label: 'Mode' },
+        { key: 'venue', label: 'Venue' },
+        { key: 'startDate', label: 'Start Date' },
+        { key: 'endDate', label: 'End Date' },
+        { key: 'enrolledCount', label: 'Enrolled' },
+        { key: 'maxCapacity', label: 'Capacity' },
+        { key: 'availableSeats', label: 'Available Seats' },
+        { key: 'fee', label: 'Fee' },
+        { key: 'discount', label: 'Discount' },
+        { key: 'status', label: 'Status' },
+      ])
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Breadcrumb />
@@ -60,7 +103,7 @@ export default function BatchesPage() {
           { options: BATCH_STATUSES, value: statusFilter, onChange: setStatusFilter, placeholder: 'All Statuses' },
           { options: courseOptions, value: courseFilter, onChange: setCourseFilter, placeholder: 'All Courses' },
         ]}
-        exportData
+exportData={{ onClick: handleExport, loading: exporting }}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { cancelLeave, getLeaveById } from '@/lib/db/queries/leaves'
-import { hasPermission, isAdmin } from '@/lib/auth/authorization'
+import { hasPermission, isAdminOrHR } from '@/lib/auth/authorization'
 import { createAdminClient } from '@/lib/db/server-client'
 import { z } from 'zod'
 
@@ -18,7 +18,7 @@ export async function POST(
       const canCancel = await hasPermission(user, 'leaves.cancel') || 
                         await hasPermission(user, 'leaves.approve')
       
-      if (!canCancel && !isAdmin(user)) {
+      if (!canCancel && !isAdminOrHR(user)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
       
@@ -38,7 +38,7 @@ export async function POST(
       const body = await request.json()
       const validated = cancelSchema.parse(body)
       
-      if (leave.employeeId !== user.userId && !isAdmin(user)) {
+      if (leave.employeeId !== user.userId && !isAdminOrHR(user)) {
         if (await hasPermission(user, 'leaves.approve')) {
           const supabase = await createAdminClient()
           const { data: employee } = await supabase

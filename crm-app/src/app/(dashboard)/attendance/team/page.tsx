@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { useAuth } from '@/context/auth-context'
 import { canViewTeamAttendance, hasPermission, canAdjustAttendanceRecords } from '@/lib/client-permissions'
 import { formatDate, formatTime } from '@/lib/utils'
@@ -54,6 +55,9 @@ export default function AttendanceTeamTodayPage() {
   const [workDate, setWorkDate] = useState(() => new Date().toISOString().split('T')[0])
   const [departmentInput, setDepartmentInput] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('')
+  const [roleFilter, setRoleFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [departments, setDepartments] = useState<string[]>([])
   const [adjustModalOpen, setAdjustModalOpen] = useState(false)
   const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null)
   const [selectedUserName, setSelectedUserName] = useState<string>('')
@@ -68,6 +72,9 @@ export default function AttendanceTeamTodayPage() {
       params.set('date', workDate)
       if (canFilterDept && departmentFilter.trim()) {
         params.set('department', departmentFilter.trim())
+      }
+      if (roleFilter !== 'all') {
+        params.set('role', roleFilter)
       }
       const res = await fetch(`/api/attendance/team-today?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -84,11 +91,30 @@ export default function AttendanceTeamTodayPage() {
     } finally {
       setLoading(false)
     }
-  }, [canAccess, canFilterDept, departmentFilter, toast, workDate])
+  }, [canAccess, canFilterDept, departmentFilter, roleFilter, toast, workDate])
+
+  const loadDepartments = useCallback(async () => {
+    try {
+      const token = getAccessToken()
+      const res = await fetch('/api/departments', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const json = await res.json()
+      if (res.ok && json.data) {
+        setDepartments(json.data.map((d: { key: string }) => d.key))
+      }
+    } catch {
+      setDepartments([])
+    }
+  }, [])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void loadDepartments()
+  }, [loadDepartments])
 
   if (!user) return null
 
@@ -116,6 +142,32 @@ export default function AttendanceTeamTodayPage() {
     }
     return { label: 'Not checked in', variant: 'outline' }
   }
+
+  function statusKey(row: TeamRow): string {
+    const sessions = row.sessionsToday ?? []
+    const open = sessions.find((s) => s.checkInTime && !s.checkOutTime)
+    const hasLate = sessions.some((s) => s.isLate)
+    const hasOutOfRadius = sessions.some((s) => s.checkInInRadius === false)
+    
+    if (open) return 'checked_in'
+    if (sessions.length > 0) return 'between_sessions'
+    return 'not_checked_in'
+  }
+
+  const filteredRows = rows.filter((row) => {
+    if (statusFilter === 'all') return true
+    if (statusFilter === 'checked_in') return statusKey(row) === 'checked_in'
+    if (statusFilter === 'not_checked_in') return statusKey(row) === 'not_checked_in'
+    if (statusFilter === 'between_sessions') return statusKey(row) === 'between_sessions'
+    if (statusFilter === 'late') return row.sessionsToday?.some((s) => s.isLate) ?? false
+    if (statusFilter === 'out_of_radius') return row.sessionsToday?.some((s) => s.checkInInRadius === false) ?? false
+    return true
+  }).filter((row) => {
+    if (roleFilter === 'all') return true
+    return row.role === roleFilter
+  })
+
+  const uniqueRoles = Array.from(new Set(rows.map((r) => r.role))).sort()
 
   const handleOpenAdjustModal = (record: AttendanceRecord, userName: string) => {
     setSelectedRecord(record)
@@ -150,62 +202,121 @@ export default function AttendanceTeamTodayPage() {
         </div>
         {canFilterDept && (
           <div className="space-y-2">
-            <Label htmlFor="dept">Department (optional)</Label>
-            <div className="flex gap-2">
-              <Input
-                id="dept"
-                placeholder="e.g. engineering"
-                value={departmentInput}
-                onChange={(e) => setDepartmentInput(e.target.value)}
-                className="w-56"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setDepartmentFilter(departmentInput.trim())
-                }}
-              >
-                Apply
-              </Button>
-            </div>
+            <Label htmlFor="deptFilter">Department</Label>
+            <Select
+              id="deptFilter"
+              value={departmentFilter || 'all'}
+              onChange={(e) => setDepartmentFilter(e.target.value === 'all' ? '' : e.target.value)}
+              className="w-48"
+            >
+              <option value="all">All departments</option>
+              {departments.map((dept) => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+            </Select>
           </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="roleFilter">Role</Label>
+          <Select
+            id="roleFilter"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="w-48"
+          >
+            <option value="all">All roles</option>
+            {uniqueRoles.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="statusFilter">Status</Label>
+          <Select
+            id="statusFilter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-48"
+          >
+            <option value="all">All statuses</option>
+            <option value="checked_in">Checked in</option>
+            <option value="not_checked_in">Not checked in</option>
+            <option value="between_sessions">Between sessions</option>
+            <option value="late">Late</option>
+            <option value="out_of_radius">Out of radius</option>
+          </Select>
+        </div>
+        {(departmentFilter || roleFilter !== 'all' || statusFilter !== 'all') && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setDepartmentFilter('')
+              setDepartmentInput('')
+              setRoleFilter('all')
+              setStatusFilter('all')
+            }}
+          >
+            Clear filters
+          </Button>
         )}
       </div>
 
       {stats && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-          <Card>
+          <Card 
+            className={statusFilter === 'all' ? 'ring-2 ring-primary' : 'cursor-pointer hover:bg-muted/50'}
+            onClick={() => setStatusFilter('all')}
+          >
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">In scope</p>
               <p className="text-2xl font-semibold">{stats.total}</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card 
+            className={statusFilter === 'checked_in' ? 'ring-2 ring-primary' : 'cursor-pointer hover:bg-muted/50'}
+            onClick={() => setStatusFilter('checked_in')}
+          >
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">Checked in (here)</p>
               <p className="text-2xl font-semibold text-primary">{stats.checkedInNoCheckout}</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card 
+            className={statusFilter === 'not_checked_in' ? 'ring-2 ring-primary' : 'cursor-pointer hover:bg-muted/50'}
+            onClick={() => setStatusFilter('not_checked_in')}
+          >
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">Not checked in</p>
               <p className="text-2xl font-semibold">{stats.notCheckedIn}</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card 
+            className={statusFilter === 'between_sessions' ? 'ring-2 ring-primary' : 'cursor-pointer hover:bg-muted/50'}
+            onClick={() => setStatusFilter('between_sessions')}
+          >
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">Between sessions</p>
               <p className="text-2xl font-semibold">{stats.betweenSessions}</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card 
+            className={statusFilter === 'late' ? 'ring-2 ring-primary' : 'cursor-pointer hover:bg-muted/50'}
+            onClick={() => setStatusFilter('late')}
+          >
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">Late</p>
               <p className="text-2xl font-semibold text-amber-600">{stats.late}</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card 
+            className={statusFilter === 'out_of_radius' ? 'ring-2 ring-primary' : 'cursor-pointer hover:bg-muted/50'}
+            onClick={() => setStatusFilter('out_of_radius')}
+          >
             <CardContent className="pt-4">
               <p className="text-xs text-muted-foreground">Out of radius</p>
               <p className="text-2xl font-semibold text-destructive">{stats.outOfRadius}</p>
@@ -216,18 +327,23 @@ export default function AttendanceTeamTodayPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Roster</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>Roster</span>
+            <span className="text-sm text-muted-foreground">
+              {filteredRows.length} of {rows.length} employees
+            </span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="py-12 text-center">
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
             </div>
-          ) : rows.length === 0 ? (
+          ) : filteredRows.length === 0 ? (
             <EmptyState
               icon={UserCircle}
-              title="No people in scope"
-              description="Adjust department filter or permissions."
+              title="No people match filter"
+              description="Adjust status or department filter."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -236,6 +352,7 @@ export default function AttendanceTeamTodayPage() {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="pb-2 pr-3">Name</th>
                     <th className="pb-2 pr-3">Department</th>
+                    <th className="pb-2 pr-3">Role</th>
                     <th className="pb-2 pr-3">Status</th>
                     <th className="pb-2 pr-3">Check in</th>
                     <th className="pb-2 pr-3">Check out</th>
@@ -245,14 +362,15 @@ export default function AttendanceTeamTodayPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => {
+                  {filteredRows.map((row) => {
                     const s = statusLabel(row)
                     const r = row.record
                     return (
-                      <tr key={row.userId} className="border-b border-border/60">
-                        <td className="py-2 pr-3 font-medium">{row.name}</td>
-                        <td className="py-2 pr-3 capitalize">{row.department}</td>
-                        <td className="py-2 pr-3">
+<tr key={row.userId} className="border-b border-border/60">
+                         <td className="py-2 pr-3 font-medium">{row.name}</td>
+                         <td className="py-2 pr-3 capitalize">{row.department}</td>
+                         <td className="py-2 pr-3 capitalize">{row.role}</td>
+                         <td className="py-2 pr-3">
                           <Badge variant={s.variant}>{s.label}</Badge>
                           {r?.isLate && (
                             <span className="ml-2 text-xs text-amber-600">Late</span>

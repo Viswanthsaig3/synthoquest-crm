@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/table'
 import { INTERN_STATUSES, INTERNSHIP_TYPES } from '@/lib/constants'
 import { formatDate, getErrorMessage, getInitials } from '@/lib/utils'
+import { exportToCSV, formatCurrencyForExport, formatDateForExport } from '@/lib/utils/export'
 import { canViewInterns, canManageAllInterns, canDeleteIntern, canManageEmployees } from '@/lib/permissions'
 import { Briefcase, Eye, Mail, Phone, Calendar, Loader2, Plus, Trash2, Edit2, IndianRupee } from 'lucide-react'
 import Link from 'next/link'
@@ -33,6 +34,7 @@ export default function InternsPage() {
   const [departmentFilter, setDepartmentFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [interns, setInterns] = useState<Intern[]>([])
   const [total, setTotal] = useState(0)
 
@@ -85,6 +87,46 @@ export default function InternsPage() {
       toast({ title: 'Success', description: 'Intern deleted successfully' })
     } catch (error: unknown) {
       toast({ title: 'Error', description: getErrorMessage(error, 'Failed to delete intern'), variant: 'destructive' })
+    }
+  }
+
+  const handleExport = async () => {
+    if (interns.length === 0) {
+      toast({ title: 'No Data', description: 'No interns to export', variant: 'destructive' })
+      return
+    }
+    setExporting(true)
+    try {
+      const exportData = interns.map(intern => ({
+        name: intern.name,
+        email: intern.email,
+        phone: intern.phone,
+        college: intern.college,
+        department: intern.department,
+        duration: intern.duration.replace('_', ' '),
+        internshipType: intern.internshipType === 'paid_by_student' ? 'Paid By Student' : intern.internshipType,
+        status: intern.status,
+        approvalStatus: intern.approvalStatus,
+        startDate: intern.startDate ? formatDateForExport(intern.startDate) : '',
+        expectedEndDate: intern.expectedEndDate ? formatDateForExport(intern.expectedEndDate) : '',
+        stipend: intern.stipend ? formatCurrencyForExport(intern.stipend) : '',
+      }))
+      exportToCSV(exportData, 'interns', [
+        { key: 'name', label: 'Name' },
+        { key: 'email', label: 'Email' },
+        { key: 'phone', label: 'Phone' },
+        { key: 'college', label: 'College' },
+        { key: 'department', label: 'Department' },
+        { key: 'duration', label: 'Duration' },
+        { key: 'internshipType', label: 'Type' },
+        { key: 'status', label: 'Status' },
+        { key: 'approvalStatus', label: 'Approval Status' },
+        { key: 'startDate', label: 'Start Date' },
+        { key: 'expectedEndDate', label: 'Expected End Date' },
+        { key: 'stipend', label: 'Stipend' },
+      ])
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -162,7 +204,7 @@ export default function InternsPage() {
                 }
               : undefined
           }
-          exportData
+exportData={{ onClick: handleExport, loading: exporting }}
         />
 
         <Card>

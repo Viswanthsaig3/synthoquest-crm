@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
 
       const enforcementPolicy = {
         blockOnVerificationFailure: orgSettings.blockOnVerificationFailure ?? false,
-        maxIpGpsDistanceKm: 50,
+        maxIpGpsDistanceKm: 500,
         minGpsPrecisionMeters: 5,
       }
 

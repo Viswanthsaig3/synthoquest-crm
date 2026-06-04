@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { Search, Plus, Download } from 'lucide-react'
+import { Search, Plus, Download, Loader2 } from 'lucide-react'
 
 interface PageHeaderProps {
   title: string
@@ -26,7 +26,10 @@ interface PageHeaderProps {
     onChange: (value: string) => void
     placeholder?: string
   }[]
-  exportData?: boolean
+  exportData?: boolean | {
+    onClick: () => void
+    loading?: boolean
+  }
 }
 
 export function PageHeader({
@@ -37,6 +40,14 @@ export function PageHeader({
   filters,
   exportData,
 }: PageHeaderProps) {
+  const handleExport = () => {
+    if (typeof exportData === 'object' && exportData.onClick) {
+      exportData.onClick()
+    }
+  }
+
+  const isExportLoading = typeof exportData === 'object' ? exportData.loading : false
+
   return (
     <div className="space-y-4 mb-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -48,8 +59,17 @@ export function PageHeader({
         </div>
         <div className="flex items-center gap-2">
           {exportData && (
-            <Button variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-2" />
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleExport}
+              disabled={isExportLoading}
+            >
+              {isExportLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
               Export
             </Button>
           )}
